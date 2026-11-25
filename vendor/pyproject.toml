@@ -1,0 +1,38 @@
+[project]
+name = "tiktokrapi"
+version = "0.1.0"
+description = "Modern TikTok web API — instagrapi-style, pure Python with Node signer subprocess"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "curl-cffi>=0.7",
+    "pydantic>=2.5",
+    "httpx>=0.27",
+    "requests-auth-aws-sigv4>=0.7",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio", "ruff", "mypy"]
+browser = ["playwright>=1.40"]
+captcha = ["opencv-python-headless>=4.8", "numpy>=1.24"]
+all = ["playwright>=1.40", "opencv-python-headless>=4.8", "numpy>=1.24"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["tiktokrapi"]
+include = [
+    "tiktokrapi/signer/*.js",
+    "tiktokrapi/signer/*.mjs",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
+ignore = ["E501"]
