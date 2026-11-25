@@ -1,0 +1,89 @@
+# Render blueprint.
+#
+# The default deployment is a single web service that runs the job queue
+# in-process (REDIS_URL empty) and stores state in SQLite. That is the
+# cheapest shape that still works: Render's free tier has no Background
+# Worker, no persistent disk and spins down after 15 minutes idle.
+#
+# For a production shape, uncomment the worker + Postgres + Redis block below
+# and set REDIS_URL / DATABASE_URL to the managed instances.
+
+services:
+  - type: web
+    name: tiktok-automation-api
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: API_KEY
+        sync: false
+      - key: SESSION_ENCRYPTION_KEY
+        sync: false
+      - key: DATABASE_URL
+        value: sqlite+aiosqlite:///./data/engine.db
+      - key: REDIS_URL
+        value: ""
+      - key: BACKEND
+        value: browser
+      - key: ALLOW_WRITE_OPS
+        value: "false"
+      - key: REQUEST_MIN_INTERVAL
+        value: "2.0"
+      - key: REQUEST_MAX_PER_HOUR
+        value: "240"
+    disk:
+      name: engine-data
+      mountPath: /data
+      sizeGB: 1
+
+# --- production shape -------------------------------------------------------
+# services:
+#   - type: web
+#     name: tiktok-automation-api
+#     runtime: docker
+#     plan: starter
+#     dockerfilePath: ./Dockerfile
+#     healthCheckPath: /health
+#     envVars:
+#       - key: API_KEY
+#         sync: false
+#       - key: SESSION_ENCRYPTION_KEY
+#         sync: false
+#       - key: DATABASE_URL
+#         fromDatabase:
+#           name: tiktok-db
+#           property: connectionString
+#       - key: REDIS_URL
+#         fromService:
+#           type: redis
+#           name: tiktok-redis
+#           property: connectionString
+#
+#   - type: worker
+#     name: tiktok-automation-worker
+#     runtime: docker
+#     plan: starter
+#     dockerCommand: arq app.worker.WorkerSettings
+#     dockerfilePath: ./Dockerfile
+#     envVars:
+#       - key: SESSION_ENCRYPTION_KEY
+#         sync: false
+#       - key: DATABASE_URL
+#         fromDatabase:
+#           name: tiktok-db
+#           property: connectionString
+#       - key: REDIS_URL
+#         fromService:
+#           type: redis
+#           name: tiktok-redis
+#           property: connectionString
+#
+# databases:
+#   - name: tiktok-db
+#     plan: basic-256mb
+#     databaseName: tiktok
+#     user: tiktok
+#
+#   - name: tiktok-redis
+#     plan: starter
