@@ -1,15 +1,12 @@
 #!/usr/bin/env python3
-"""Install a TikTok session from a cookie header or a JSON export.
+"""Install a TikTok session from a cookie export.
 
-Extracts the sessionid, normalises the cookie set and stores everything
-encrypted. The sessionid is only ever printed in masked form.
-
-    python tools/session_from_cookies.py --file cookies.txt
     python tools/session_from_cookies.py --file cookies.txt --probe
-    cat cookies.txt | python tools/session_from_cookies.py --stdin
+    python tools/session_from_cookies.py --sessionid <the sessionid>
+    cat cookies.txt | python tools/session_from_cookies.py
 
-A bare sessionid is accepted as well — it is expanded into the minimal
-cookie set that carries the account binding.
+Accepts the raw ``Cookie:`` header a browser gives you, a Cookie-Editor
+JSON export, or a bare sessionid.
 """
 from __future__ import annotations
 
@@ -20,71 +17,85 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.sessions import save_session_material  # noqa: E402
-from app.security import (  # noqa: E402
-    SessionError,
-    extract_sessionid,
-    mask_sessionid,
-    parse_session_material,
-)
-
-
-def read_input(args) -> str:
-    if args.stdin:
-        return sys.stdin.read()
-    if args.file:
-        return Path(args.file).read_text()
-    raise SystemExit("Pass --file PATH or --stdin")
-
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--file", help="file holding the cookie header or JSON export")
-    ap.add_argument("--stdin", action="store_true", help="read the session from stdin")
-    ap.add_argument("--probe", action="store_true", help="check the session against the live site")
-    args = ap.parse_args()
+    parser = argparse.ArgumentParser(description="Install a TikTok session")
+    parser.add_argument("--file", help="a file with the cookies")
+    parser.add_argument("--sessionid", help="just the sessionid")
+    parser.add_argument("--probe", action="store_true", help="check it against the live site")
+    args = parser.parse_args()
 
-    raw = read_input(args)
+    raw = b""
+    if args.file:
+        path = Path(args.file)
+        if not path.exists():
+            print(f"no such file: {path}", file=sys.stderr)
+            return 2
+        raw = path.read_bytes()
+    elif args.sessionid:
+        raw = args.sessionid.strip().encode()
+    else:
+        raw = sys.stdin.buffer.read()
 
-    # Report the sessionid before storing it, so a failed write is still visible.
-    cookies = parse_session_material(raw)
-    try:
-        sessionid = extract_sessionid(cookies)
-    except SessionError as exc:
-        print(f"error: {exc}", file=sys.stderr)
+    if not raw.strip():
+        print("nothing to install — pass --file, --sessionid or pipe the cookies in", file=sys.stderr)
         return 2
-    print(f"sessionid : {mask_sessionid(sessionid)}")
-    print(f"cookies   : {len(cookies)}")
 
-    info = asyncio.run(save_session_material(raw, cookies=cookies))
-    print(f"stored    : {info['cookies']} cookies (encrypted at {info['status']})")
-    if info["dropped_cookies"]:
-        print(f"dropped   : {', '.join(info['dropped_cookies'])} (CDN edge cookies)")
-    if info["missing_optional_cookies"]:
-        print(f"note      : missing {', '.join(info['missing_optional_cookies'])}")
-
-    if args.probe:
-        from app.adapters.tiktok import TikTokAdapter
-
-        async def run_probe():
-            adapter = TikTokAdapter()
-            await adapter.start()
-            try:
-                return await adapter.call("me", {})
-            finally:
-                await adapter.stop()
+    async def run() -> int:
+        from app.sessions import record_verification, save_session_material
+        from app.security import (
+            SessionError,
+            extract_sessionid,
+            mask_sessionid,
+            parse_session_material,
+        )
 
         try:
-            result = asyncio.run(run_probe())
+            cookies = parse_session_material(raw)
+        except SessionError as exc:
+            print(f"those cookies could not be read: {exc}", file=sys.stderr)
+            return 2
+
+        sessionid = extract_sessionid(cookies)
+        if not sessionid:
+            print("no sessionid in those cookies", file=sys.stderr)
+            return 2
+
+        info = await save_session_material(raw, cookies=cookies)
+        print(f"sessionid : {mask_sessionid(sessionid)}")
+        print(f"cookies   : {len(cookies)}")
+        print(f"stored    : {info.get('cookies', len(cookies))} cookies (encrypted at {info.get('status', 'unverified')})")
+
+        if not args.probe:
+            return 0
+
+        from app.adapters.tiktok import TikTokAdapter
+
+        adapter = TikTokAdapter()
+        try:
+            await adapter.start()
+            result = await adapter.call("me", {})
         except Exception as exc:  # noqa: BLE001
-            print(f"probe     : FAILED {type(exc).__name__}: {exc}")
+            await record_verification("invalid", f"{type(exc).__name__}: {str(exc)[:300]}")
+            print(f"probe     : FAILED {type(exc).__name__}: {exc}", file=sys.stderr)
             return 1
-        account = result.get("account", {})
+        finally:
+            await adapter.stop()
+
+        account = result.get("account") or {}
+        await record_verification(
+            "valid",
+            detail=f"probed via {adapter.backend_name}",
+            username=account.get("unique_id"),
+            account_id=str(account.get("id") or "") or None,
+        )
         print(
             f"probe     : OK account={account.get('unique_id')} "
             f"id={account.get('id')} nickname={account.get('nickname')!r}"
         )
-    return 0
+        return 0
+
+    return asyncio.run(run())
 
 
 if __name__ == "__main__":
