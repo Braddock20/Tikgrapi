@@ -1,0 +1,62 @@
+[
+  {
+    "id": "ob_001",
+    "text": "Everyone photographs the food and forgets to photograph each other.",
+    "category": "observation",
+    "mood": "humour",
+    "intensity": "low",
+    "format": "scrapbook",
+    "tags": [
+      "friendship",
+      "food"
+    ]
+  },
+  {
+    "id": "ob_002",
+    "text": "People are at their kindest when they do not know you are watching.",
+    "category": "observation",
+    "mood": "reflective",
+    "intensity": "medium",
+    "format": "editorial",
+    "tags": [
+      "kindness",
+      "people"
+    ]
+  },
+  {
+    "id": "ob_003",
+    "text": "The supermarket at 6am is the only place that still feels like the world belongs to adults.",
+    "category": "observation",
+    "mood": "calm",
+    "intensity": "low",
+    "format": "minimal",
+    "tags": [
+      "morning",
+      "quiet"
+    ]
+  },
+  {
+    "id": "ob_004",
+    "text": "Confession: the playlist I made for you was mostly songs I was already thinking about.",
+    "category": "relationship",
+    "mood": "romantic",
+    "intensity": "medium",
+    "format": "letter",
+    "tags": [
+      "music",
+      "confession"
+    ]
+  },
+  {
+    "id": "ob_005",
+    "text": "Getting over something is mostly just getting busy enough to stop noticing.",
+    "category": "observation",
+    "mood": "melancholic",
+    "intensity": "medium",
+    "format": "diary",
+    "tags": [
+      "healing",
+      "busy"
+    ]
+  }
+]
