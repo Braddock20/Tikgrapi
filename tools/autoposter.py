@@ -1,53 +1,40 @@
 #!/usr/bin/env python3
-"""Post videos automatically, without being there.
+"""Post videos from a folder, on a schedule.
 
-Drop videos into a queue folder and this posts them on a schedule.
-
-    # post every video in the folder, one every 2 hours
     python tools/autoposter.py --dir data/queue --interval 7200
-
-    # post three now and exit (handy for cron)
     python tools/autoposter.py --dir data/queue --count 3 --interval 0
-
-    # captions: one per line, cycled
     python tools/autoposter.py --dir data/queue --captions captions.txt
-
-    # or a sidecar next to each video: clip.mp4 + clip.txt
     python tools/autoposter.py --dir data/queue --default-caption "hello"
+    python tools/autoposter.py --dir data/queue --tag fyp tiktok --delete-after --loop
 
-Already-posted files are remembered in ``<dir>/.posted.json`` so a restart
-never reposts. Write operations must be enabled: ALLOW_WRITE_OPS=true.
+Caption resolution: a sidecar next to the video (``clip.mp4`` -> ``clip.txt``)
+wins, then the next line of the caption list, then ``--default-caption``.
 """
 from __future__ import annotations
 
 import argparse
 import asyncio
-import logging
-import os
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.adapters.tiktok import TikTokAdapter  # noqa: E402
-from app.bot.autoposter import AutoPoster  # noqa: E402
-from app.config import settings  # noqa: E402
-from app.db import init_db  # noqa: E402
-
 
 async def run(args) -> int:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    await init_db()
-
-    if not settings.allow_write_ops:
-        print("ALLOW_WRITE_OPS is false — posting is disabled.")
-        print("Set ALLOW_WRITE_OPS=true in .env to enable it.")
-        return 2
+    from app.adapters.tiktok import TikTokAdapter
+    from app.bot.autoposter import AutoPoster
+    from app.bot.engine import BotEngine
 
     adapter = TikTokAdapter()
-    await adapter.start()
+    try:
+        await adapter.start()
+    except Exception as exc:  # noqa: BLE001
+        print(f"could not start the client: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 2
+
+    engine = BotEngine(adapter)
     poster = AutoPoster(
-        adapter,
+        engine,
         args.dir,
         captions=args.captions,
         default_caption=args.default_caption,
@@ -63,29 +50,45 @@ async def run(args) -> int:
         if args.count:
             results = await poster.run_once(args.count)
             for result in results:
-                print(result)
-            print(f"posted {len(results)} video(s)")
-            return 0 if results else 1
-        print(f"autoposter watching {args.dir} — one post every {args.interval:.0f}s")
+                if result.get("error"):
+                    print(f"failed: {result['error']}")
+                else:
+                    print(f"posted: {result.get('video_path')} -> {result.get('aweme_id')}")
+            return 0
         await poster.run_forever()
-        return 0
+    except KeyboardInterrupt:
+        print("\nstopped")
     finally:
         await adapter.stop()
+    return 0
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--dir", default="data/queue", help="folder holding the videos")
-    ap.add_argument("--captions", help="file with one caption per line")
-    ap.add_argument("--default-caption", default="", help="caption when nothing else applies")
-    ap.add_argument("--tag", nargs="*", help="hashtags appended to every caption")
-    ap.add_argument("--interval", type=float, default=3600.0, help="seconds between posts")
-    ap.add_argument("--count", type=int, help="post this many and exit")
-    ap.add_argument("--delete-after", action="store_true", help="delete the video once posted")
-    ap.add_argument("--visibility", type=int, default=0, choices=[0, 1, 2],
-                    help="0 public, 1 friends, 2 private")
-    ap.add_argument("--loop", action="store_true", help="keep polling when the queue empties")
-    args = ap.parse_args()
+    parser = argparse.ArgumentParser(description="Post videos on a schedule")
+    parser.add_argument("--dir", default="./data/queue", help="the queue folder")
+    parser.add_argument("--count", type=int, help="post this many and stop")
+    parser.add_argument("--interval", type=float, default=3600.0, help="seconds between posts")
+    parser.add_argument("--captions", help="a file with one caption per line")
+    parser.add_argument("--default-caption", default="", help="used when nothing else matches")
+    parser.add_argument("--tag", nargs="*", help="hashtags appended to every caption")
+    parser.add_argument("--delete-after", action="store_true", help="remove the file after posting")
+    parser.add_argument("--loop", action="store_true", help="keep going when the queue empties")
+    parser.add_argument(
+        "--visibility", type=int, default=0, choices=[0, 1, 2],
+        help="0 public, 1 friends, 2 private",
+    )
+    args = parser.parse_args()
+
+    from app.config import settings
+
+    if not settings.allow_write_ops:
+        print(
+            "ALLOW_WRITE_OPS is false — posting changes the account, so the "
+            "autoposter refuses to start. Set ALLOW_WRITE_OPS=true to allow it.",
+            file=sys.stderr,
+        )
+        return 2
+
     return asyncio.run(run(args))
 
 
