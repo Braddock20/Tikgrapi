@@ -5,6 +5,7 @@ from app.operations import (
     BACKEND_API,
     BACKEND_HTTP,
     BACKEND_SSR,
+    BACKEND_UPLOAD,
     OPERATIONS,
     WRITE_OPERATIONS,
     describe,
@@ -33,7 +34,7 @@ def test_read_operations_are_not_writes():
 
 def test_each_operation_has_a_known_backend():
     for spec in OPERATIONS.values():
-        assert spec.backend in (BACKEND_SSR, BACKEND_API, BACKEND_HTTP)
+        assert spec.backend in (BACKEND_SSR, BACKEND_API, BACKEND_HTTP, BACKEND_UPLOAD)
 
 
 def test_missing_parameters_are_reported():
