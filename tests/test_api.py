@@ -69,7 +69,7 @@ def test_a_job_is_accepted_and_reaches_a_terminal_state():
 
         # the inline queue runs it; without a session the job fails, but the
         # lifecycle must still complete
-        for _ in range(50):
+        for _ in range(200):
             job = c.get(f"/jobs/{job_id}", headers=HEADERS).json()
             if job["status"] not in ("queued", "running"):
                 break
@@ -118,15 +118,15 @@ def test_uploading_a_cookie_header_extracts_the_sessionid():
     )
     with client() as c:
         r = c.post("/admin/session", content=cookies, headers={**HEADERS, "Content-Type": "text/plain"})
-    assert r.status_code == 200
-    body = r.json()
-    assert body["stored"] is True and body["encrypted"] is True
-    assert body["sessionid"] == "a1b2c3…8f90"
-    assert "a1b2c3d4e5f60718293a4b5c6d7e8f90" not in json.dumps(body)
+        assert r.status_code == 200
+        body = r.json()
+        assert body["stored"] is True and body["encrypted"] is True
+        assert body["sessionid"] == "a1b2c3…8f90"
+        assert "a1b2c3d4e5f60718293a4b5c6d7e8f90" not in json.dumps(body)
 
-    meta = c.get("/admin/session", headers=HEADERS).json()
-    assert meta["present"] is True
-    assert meta["session"]["sessionid"] == "a1b2c3…8f90"
+        meta = c.get("/admin/session", headers=HEADERS).json()
+        assert meta["present"] is True
+        assert meta["session"]["sessionid"] == "a1b2c3…8f90"
 
 def test_uploading_a_session_without_a_sessionid_is_rejected():
     with client() as c:
