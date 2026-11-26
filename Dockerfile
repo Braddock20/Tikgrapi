@@ -1,11 +1,6 @@
 # The image is built to fit Render's free tier: 512 MB of RAM, 0.5 vCPU.
 #
 #   docker build -t tiktok-engine .
-#   docker build --build-arg SYSTEM_CHROME=1 -t tiktok-engine .
-#
-# SYSTEM_CHROME=1 uses Debian's chromium instead of Playwright's own build.
-# It skips a ~420 MB download and keeps the image far smaller; set
-# BROWSER_EXECUTABLE_PATH=/usr/bin/chromium to match.
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -27,44 +22,39 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libnspr4 \
         libatk1.0-0 \
         libatk-bridge2.0-0 \
+        libatspi2.0-0 \
         libcups2 \
+        libdbus-1-3 \
         libdrm2 \
-        libxkbcommon0 \
+        libexpat1 \
+        libfontconfig1 \
+        libfreetype6 \
+        libglib2.0-0 \
+        libx11-6 \
+        libx11-xcb1 \
+        libxcb1 \
         libxcomposite1 \
         libxdamage1 \
+        libxext6 \
         libxfixes3 \
+        libxkbcommon0 \
         libxrandr2 \
+        libxshmfence1 \
         libgbm1 \
         libpango-1.0-0 \
         libcairo2 \
         libasound2 \
-        libx11-6 \
-        libxcb1 \
-        libxext6 \
+        libwayland-client0 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# The browser. Playwright's own build is the default; SYSTEM_CHROME=1 uses
-# Debian's chromium and skips the download entirely.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    chromium \
-    fonts-unifont \
-    fonts-liberation \
-    fonts-noto-color-emoji \
-    libnss3 \
-    libatk1.0-0 \
-    libatk-bridge2.0-0 \
-    libx11-xcb1 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxfixes3 \
-    libxrandr2 \
-    libgbm1 \
-    libasound2 \
-    libxshmfence1 \
-    && rm -rf /var/lib/apt/lists/*
+# Install the exact Chromium revision required by the pinned Playwright.
+# Do NOT use `--with-deps`: Debian Trixie removed legacy ttf-* package names
+# requested by Playwright 1.49's dependency installer. Runtime libraries are
+# installed explicitly above.
+RUN playwright install chromium
 
 COPY . .
 
