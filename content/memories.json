@@ -1,0 +1,88 @@
+[
+  {
+    "id": "mem_001",
+    "text": "There was a summer where we stayed up until four and nothing bad ever happened.",
+    "category": "memory",
+    "mood": "nostalgic",
+    "intensity": "medium",
+    "format": "nostalgic",
+    "tags": [
+      "summer",
+      "friendship",
+      "youth"
+    ]
+  },
+  {
+    "id": "mem_002",
+    "text": "My grandmother's kitchen always smelled like cinnamon and something I could never name.",
+    "category": "memory",
+    "mood": "nostalgic",
+    "intensity": "medium",
+    "format": "letter",
+    "tags": [
+      "family",
+      "kitchen",
+      "scent"
+    ]
+  },
+  {
+    "id": "mem_003",
+    "text": "We drove with the windows down and the same song on repeat for six hours.",
+    "category": "memory",
+    "mood": "nostalgic",
+    "intensity": "low",
+    "format": "nostalgic",
+    "tags": [
+      "roadtrip",
+      "music"
+    ]
+  },
+  {
+    "id": "mem_004",
+    "text": "The old house is an apartment now, and someone else waters the plants.",
+    "category": "memory",
+    "mood": "melancholic",
+    "intensity": "medium",
+    "format": "editorial",
+    "tags": [
+      "home",
+      "change"
+    ]
+  },
+  {
+    "id": "mem_005",
+    "text": "You sent me a voice note at 2am and I have never deleted it.",
+    "category": "relationship",
+    "mood": "romantic",
+    "intensity": "medium",
+    "format": "letter",
+    "tags": [
+      "voicenote",
+      "night"
+    ]
+  },
+  {
+    "id": "mem_006",
+    "text": "Before everything got complicated, the plan was simple and we believed it.",
+    "category": "memory",
+    "mood": "nostalgic",
+    "intensity": "high",
+    "format": "nostalgic",
+    "tags": [
+      "youth",
+      "belief"
+    ]
+  },
+  {
+    "id": "mem_007",
+    "text": "There was a blue bike with a bell that did not ring, and I was the only one who could fix it.",
+    "category": "memory",
+    "mood": "nostalgic",
+    "intensity": "low",
+    "format": "scrapbook",
+    "tags": [
+      "childhood",
+      "bike"
+    ]
+  }
+]
