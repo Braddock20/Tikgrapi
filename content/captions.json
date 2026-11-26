@@ -1,0 +1,50 @@
+[
+  {
+    "id": "cap_001",
+    "text": "POV: you said one sentence and rewrote the whole evening in your head.",
+    "category": "caption",
+    "mood": "humour",
+    "intensity": "low",
+    "format": "scrapbook",
+    "tags": [
+      "pov",
+      "overthinking"
+    ]
+  },
+  {
+    "id": "cap_002",
+    "text": "Things I did not say today, in order of increasing cowardice.",
+    "category": "caption",
+    "mood": "funny",
+    "intensity": "low",
+    "format": "scrapbook",
+    "tags": [
+      "pov",
+      "regret"
+    ]
+  },
+  {
+    "id": "cap_003",
+    "text": "Nobody warns you that growing up is mostly learning which rooms to leave.",
+    "category": "caption",
+    "mood": "reflective",
+    "intensity": "medium",
+    "format": "editorial",
+    "tags": [
+      "growth",
+      "quotes"
+    ]
+  },
+  {
+    "id": "cap_004",
+    "text": "Me explaining the plan: definitely a plan. Absolutely a plan.",
+    "category": "caption",
+    "mood": "funny",
+    "intensity": "low",
+    "format": "scrapbook",
+    "tags": [
+      "pov",
+      "humor"
+    ]
+  }
+]
