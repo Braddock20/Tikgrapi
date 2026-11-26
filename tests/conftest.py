@@ -25,3 +25,7 @@ os.environ.setdefault("BROWSER_HEADLESS", "true")
 os.environ.setdefault("ALLOW_WRITE_OPS", "false")
 os.environ.setdefault("REQUEST_MIN_INTERVAL", "0")
 os.environ.setdefault("REQUEST_MAX_PER_HOUR", "1000")
+# The tests never talk to TikTok: the boot renewal and the boot check would
+# both reach out to the live site.
+os.environ.setdefault("SESSION_VERIFY_ON_BOOT", "false")
+os.environ.setdefault("SESSION_RENEW_ON_BOOT", "false")
