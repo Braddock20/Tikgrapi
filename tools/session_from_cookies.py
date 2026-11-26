@@ -7,6 +7,9 @@ encrypted. The sessionid is only ever printed in masked form.
     python tools/session_from_cookies.py --file cookies.txt
     python tools/session_from_cookies.py --file cookies.txt --probe
     cat cookies.txt | python tools/session_from_cookies.py --stdin
+
+A bare sessionid is accepted as well — it is expanded into the minimal
+cookie set that carries the account binding.
 """
 from __future__ import annotations
 
@@ -22,7 +25,7 @@ from app.security import (  # noqa: E402
     SessionError,
     extract_sessionid,
     mask_sessionid,
-    parse_session_payload,
+    parse_session_material,
 )
 
 
@@ -44,7 +47,7 @@ def main() -> int:
     raw = read_input(args)
 
     # Report the sessionid before storing it, so a failed write is still visible.
-    cookies = parse_session_payload(raw)
+    cookies = parse_session_material(raw)
     try:
         sessionid = extract_sessionid(cookies)
     except SessionError as exc:
@@ -53,7 +56,7 @@ def main() -> int:
     print(f"sessionid : {mask_sessionid(sessionid)}")
     print(f"cookies   : {len(cookies)}")
 
-    info = asyncio.run(save_session_material(raw))
+    info = asyncio.run(save_session_material(raw, cookies=cookies))
     print(f"stored    : {info['cookies']} cookies (encrypted at {info['status']})")
     if info["dropped_cookies"]:
         print(f"dropped   : {', '.join(info['dropped_cookies'])} (CDN edge cookies)")
