@@ -41,6 +41,7 @@ app/
 ├─ operations.py      the registry: every operation, its backend, its safety class
 ├─ security.py        Fernet session store + cookie parsing
 ├─ sessions.py        upload / normalise / track / probe a session
+├─ keeper.py          the session keeper: renew, heal, stay attached
 ├─ ratelimit.py       conservative pacing
 └─ adapters/
    ├─ browser.py      signed requests through a real Chromium
@@ -81,6 +82,86 @@ account state.
 
 **Write operations are off by default.** `ALLOW_WRITE_OPS=false` refuses them
 in the adapter itself, and `POST /admin/pause` is a second, runtime switch.
+
+---
+
+## The permanent attachment
+
+This is the part that answers *"do sessions die after some time?"*.
+
+**No — not while you keep the account logged in.** A TikTok session is two
+things at once:
+
+| | cookies | lifetime |
+|---|---|---|
+| **durable** | `sessionid`, `tt-target-idc`, `odin_tt` | months — dies when *you* log out, or change the password |
+| **volatile** | `msToken`, `ttwid`, `tt_csrf_token` | hours — the site re-mints them on every visit |
+
+The volatile half used to be the reason a bot "died": the sessionid was fine
+but the device tokens had expired, and every call came back empty. The engine
+now re-mints that half on its own:
+
+* **at boot** — the session is installed from `TIKTOK_SESSION` and the browser
+  visits the site, so a full set of device tokens is captured immediately;
+* **every `SESSION_RENEW_HOURS` hours (default 6)** — the same, in the
+  background, for as long as the process runs;
+* **the moment a call comes back unauthenticated** — the session is re-minted
+  and the call is retried once (`POST /admin/session/renew` does it by hand);
+* **as a last resort** — if the durable half is gone too, the keeper falls
+  back to the copy in `TIKTOK_SESSION` and tries again.
+
+So the account stays attached as long as the environment variable holds a live
+sessionid. Nothing else is needed, and nothing else expires on you.
+
+### The one variable that holds it
+
+`TIKTOK_SESSION` takes either shape:
+
+```bash
+# the whole cookie header (what the browser gives you) — recommended
+TIKTOK_SESSION=sessionid=b1ee9c…; sessionid_ss=b1ee9c…; tt-target-idc=alisg; …
+
+# or just the sessionid
+TIKTOK_SESSION=<paste-your-sessionid-here>
+```
+
+A bare sessionid is expanded into the binding cookies automatically
+(`sessionid`, `sessionid_ss` and the edge cookie `tt-target-idc`). That is
+measured, not assumed:
+
+| cookies sent | rendered page | inbox API |
+|---|---|---|
+| `sessionid` | guest — no account | `status_code 10202` (not logged in) |
+| `sessionid` + `sessionid_ss` | guest — no account | `status_code 10202` |
+| **`sessionid` + `tt-target-idc`** | **the account** | **real data** |
+
+TikTok only honours a sessionid when the request also names the edge the
+session was issued on. The engine pairs it with `tt-target-idc` for you
+(override with `TIKTOK_TARGET_IDC`).
+
+Verified end to end from a sessionid-only environment variable on 2026-11-26:
+install → renew → `me` returns `auren_and_i` → comments read → **a video
+posted** (`aweme_id 7712427397584260373`).
+
+### What still ends it
+
+* **You log out of TikTok** — the sessionid dies with it. Nothing can keep
+  that alive; re-export the cookies and update `TIKTOK_SESSION`.
+* **You change the password** — TikTok invalidates the session.
+* **TikTok rotates the sessionid** — rare, but the keeper notices, keeps the
+  new one and tells you (`sessionid_rotated` in the status, plus a log line).
+  Update `TIKTOK_SESSION` to the value it prints.
+
+### Watching it
+
+```bash
+curl http://localhost:8000/health          # session.attached, last_renewal, renewals, heals
+curl -H "X-API-Key: $API_KEY" http://localhost:8000/admin/session
+curl -X POST -H "X-API-Key: $API_KEY" http://localhost:8000/admin/session/renew
+```
+
+`session.attached` is the field to alert on: `true` means the account really
+answered as signed in, `false` means it did not.
 
 ---
 
@@ -133,11 +214,16 @@ the live site. Measured on 2026-11-25 from a datacenter IP:
 | `/api/commit/follow/user/` | success, `following` restored afterwards |
 | `/api/user/detail/` | **empty body for every account** — blocked at IP level, not an account problem |
 | `/api/post/item_list/` | **empty body** — the site's own requests fail the same way |
+| upload (post a video) | `status_code 0`, `aweme_id` returned, visible on the profile |
 
 `user/detail` and `post/item_list` were also requested by a real browser from
 this IP and returned empty bodies there too, so they are blocked by the
 environment, not by the session. The engine therefore reads profiles from the
 server-rendered page (`__UNIVERSAL_DATA_FOR_REHYDRATION__`), which works.
+
+Measured again on 2026-11-26 from a **sessionid-only** session: install →
+renew → `me` returns the account → comments read → a video posted
+(`aweme_id 7712427397584260373`).
 
 ---
 
@@ -163,7 +249,145 @@ server-rendered page (`__UNIVERSAL_DATA_FOR_REHYDRATION__`), which works.
 
 ---
 
-## The self-chat bot
+## Auto-posting
+
+The upload pipeline was verified live against the account: a video posted in
+about six seconds and appeared on the profile (`videoCount` went 0 → 1).
+Posting uses TikTok's own creator pipeline, so **it does not need Chromium** —
+it is a plain HTTP client.
+
+### The autoposter
+
+Drop videos into a queue folder and they go out on a schedule:
+
+```bash
+# one post every two hours
+python tools/autoposter.py --dir data/queue --interval 7200
+
+# post three now and exit — handy for cron
+python tools/autoposter.py --dir data/queue --count 3 --interval 0
+
+# captions, one per line, cycled
+python tools/autoposter.py --dir data/queue --captions captions.txt
+
+# a sidecar next to each video: clip.mp4 + clip.txt
+python tools/autoposter.py --dir data/queue --default-caption "hello"
+
+# hashtags, delete the file once posted, keep going when the queue empties
+python tools/autoposter.py --dir data/queue --tag fyp tiktok --delete-after --loop
+```
+
+Caption resolution: sidecar `clip.txt` → next line of the caption list →
+`--default-caption`. Hashtags from `--tag` are appended to every caption.
+
+Posted files are recorded in `<dir>/.posted.json`, so a restart never
+reposts, and a failed upload is remembered too — one broken file cannot block
+the queue.
+
+`ALLOW_WRITE_OPS=true` is required; the autoposter refuses to start without
+it.
+
+### From the bot
+
+```
+/upload <video_path> [caption]
+/delete_video <video_id>
+/visibility <video_id> <0 public|1 friends|2 private>
+```
+
+### Posting safety
+
+TikTok penalises bulk posting from new accounts. The autoposter therefore
+defaults to one post per hour (`--interval 3600`), and the engine's global
+rate limiter and write gates apply on top. Post on your own schedule, but
+keep the interval long enough that it does not look automated — the previous
+account in this workspace was suspended after a single live test.
+
+
+---
+
+## The video engine
+
+A second, independent half of the system: it *writes* the videos the
+autoposter posts. It renders vertical compositions from a content library
+and an asset library with Pillow and FFmpeg — no AI, no browser, no
+manual design step.
+
+```bash
+# the fonts (OFL) and a starter library
+python tools/fetch_fonts.py --dest assets/fonts
+python tools/seed_library.py --content-dir content --assets-dir assets
+
+# render and look at it — nothing is published
+python -m video_engine.engine generate --preview
+
+# render a batch and hand them to the autoposter queue
+python -m video_engine.engine generate --count 5 --publish queue
+
+# what has been happening
+python -m video_engine.engine status
+```
+
+The engine picks the content, the mood, the visual identity (scrapbook,
+diary, memory archive, editorial, letter, minimalist, playful), the layout
+(one of twelve structures), the palette, the font pairing, the
+decorations, the animation and the music — then renders, validates and
+either queues or posts the result. Every choice is rule-driven and
+seeded, so the output is varied but reproducible.
+
+It talks to the posting system through one narrow door: a finished,
+validated MP4 plus a caption sidecar in the autoposter's queue directory
+(or, with `--publish upload`, the existing `upload` operation). Nothing in
+the posting path was changed, and a failed render can never trigger a
+post.
+
+Full details — libraries, layouts, validation, environment variables — are
+in [`video_engine/README.md`](video_engine/README.md).
+
+
+---
+
+## The control room
+
+The same engine, with a browser in front of it.
+
+```bash
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+# then open http://localhost:8000/  (it redirects to /ui/)
+```
+
+Paste the `API_KEY` to unlock. It is the same key the machine API uses —
+the UI keeps it in the browser's session storage and nothing else.
+
+**What you can do from the browser**
+
+* **Chat** — type `/generate 3` and watch the engine work; the live output
+  streams into the conversation. `/status`, `/cleanup`, `/queue`,
+  `/upload` and `/help` are there too.
+* **Upload** — drop a file anywhere on the window. JSON/TXT/MD goes to the
+  content library, images to the photographs or the decorations, sounds to
+  the sound library, fonts to the font folders, video to the backgrounds.
+* **Content** — the whole library, what has been used and what has not, with
+  a delete button.
+* **Library** — the asset pools and their sizes.
+* **Renders** — every finished video as a thumbnail, with download and
+  *Queue* buttons. Hovering plays the video.
+* **Queue** — what is waiting for the autoposter.
+* **Settings** — render profile, appearance and the key.
+
+**The look** is deliberately quiet: system fonts, hairline borders, one
+accent, white / grey / black in either theme, and a full-screen toggle in
+the top bar for when you want the conversation and nothing else.
+
+It is three files (`app/web/index.html`, `app/web/app.css`,
+`app/web/app.js`) plus a small router (`app/webapi.py`). No build step, no
+npm, no CDN — the container needs nothing from the internet to serve it.
+
+**Safety.** The browser may only run `generate`, `status` and `cleanup`; any
+other command is refused, and the engine's own write gates still apply to
+publishing. A failed render still never reaches the poster.
+
+---
 
 The Baileys-style bot: commands are sent inside TikTok itself and the answers
 come back the same way.
@@ -223,12 +447,19 @@ cp .env.example .env
 # set API_KEY and SESSION_ENCRYPTION_KEY
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 
+# the account itself — a sessionid is enough
+echo "TIKTOK_SESSION=<paste-your-sessionid-here>" >> .env
+
 pip install -r requirements.txt
 playwright install --with-deps chromium
 
-python tools/session_from_cookies.py --file cookies.txt --probe
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
+
+The session is installed from the environment at startup — there is no
+`cookies.txt` to ship and no session file to keep alive. `tools/session_from_cookies.py`
+is still there when you want to install a session from the command line
+instead.
 
 With `REDIS_URL` empty the service uses SQLite and an in-process worker — no
 Postgres, no Redis. Set `REDIS_URL` and `DATABASE_URL` to switch to the
@@ -247,17 +478,73 @@ curl -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
 ## Tests
 
 ```bash
-python -m pytest tests/ -q      # 50 passed
+python -m pytest tests/ -q      # 108 passed
 ```
 
+| File | Covers |
+|---|---|
+| `tests/test_api.py`, `test_keeper.py`, `test_bot.py`, `test_autoposter.py`, `test_operations.py`, `test_schemas.py`, `test_security.py` | the service, the session, the bot and the posting pipeline |
+| `tests/test_video_engine.py` | the engine: libraries, composition, layouts, typography, validation, audio sync, duplicate prevention, the failure path |
+| `tests/test_webui.py` | the control room: the pages, the API, the key, uploads, the command whitelist |
+
 The suite runs offline: no TikTok, no browser, no network.
+
+## Troubleshooting
+
+**`could not start the TikTok client: SessionError: No session uploaded`**
+— the API is fine; the TikTok client had no session to work with. It happens
+on a fresh unpack because the session is a credential and is deliberately not
+shipped in the zip. Set `TIKTOK_SESSION` and restart, or install it now:
+
+```bash
+python tools/session_from_cookies.py --file cookies.txt --probe
+# or
+curl -H "X-API-Key: $API_KEY" -H "Content-Type: text/plain" \
+     --data-binary @cookies.txt http://localhost:8000/admin/session
+```
+
+**The account answers as a guest (`status_code 10202`, `session.attached`
+is `false`)** — the sessionid is there but TikTok does not recognise it. Two
+reasons: the environment holds a sessionid that is no longer valid (log in
+again and export fresh cookies), or the edge cookie is missing. A bare
+sessionid is paired with `tt-target-idc` automatically; if your session was
+issued on another edge, set `TIKTOK_TARGET_IDC` to match it, or paste the
+whole cookie header into `TIKTOK_SESSION`.
+
+`GET /health` tells you the truth: `session.status` is `missing` until a
+session is installed, then `unverified`, then `valid` or `invalid`;
+`session.attached` says whether the account really answered.
+
+**TikTok calls return an empty body** — the session was rejected or the
+endpoint is blocked from your IP. Run `POST /admin/session/probe` and read
+`session.detail`.
+
+**Everything works but the account looks empty** — a brand-new account has no
+videos, no followers and no following; that is real data, not a failure.
 
 ## Deployment
 
 `docker compose up --build` for the full stack, or the `render.yaml` blueprint
-for a single service with an in-process worker and a 1 GB disk for the
-session. See `render.yaml` for the commented production shape (web + worker +
-Postgres + Redis).
+for a single service with an in-process worker. See `render.yaml` for the
+commented production shape (web + worker + Postgres + Redis).
+
+The Render service needs **three** environment variables and nothing else:
+
+| variable | what it is |
+|---|---|
+| `API_KEY` | the key your clients send in `X-API-Key` |
+| `SESSION_ENCRYPTION_KEY` | a Fernet key — `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
+| `TIKTOK_SESSION` | the account: your sessionid, or the whole cookie header |
+
+No disk is needed: the session is rebuilt from `TIKTOK_SESSION` on every boot
+and renewed while the service runs. `DATABASE_URL` defaults to SQLite next to
+the app, `BACKEND` to `browser`, `ALLOW_WRITE_OPS` to `false` — change the
+last one only when you mean it.
+
+```bash
+# render.yaml is a blueprint:
+render blueprint launch   # or: New + Blueprint -> pick this repository
+```
 
 ## Provenance
 
