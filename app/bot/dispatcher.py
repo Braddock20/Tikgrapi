@@ -7,6 +7,7 @@ to be off.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
@@ -30,6 +31,7 @@ class InboundMessage:
     conversation_id: str = ""
     timestamp: float = field(default_factory=time.time)
     is_self: bool = False
+    channel: str = ""
 
 
 class Dispatcher:
@@ -40,13 +42,15 @@ class Dispatcher:
         engine: Any,
         allowed_authors: set[str] | None = None,
         cooldown: float = 2.0,
+        services: dict[str, Any] | None = None,
     ) -> None:
         self.engine = engine
         self.allowed_authors = allowed_authors or set()
         self.cooldown = cooldown
+        self.services = services or {}
         self._seen: dict[str, float] = {}
         self._last_command = 0.0
-        self.stats = {"handled": 0, "ignored": 0, "errors": 0}
+        self.stats = {"handled": 0, "ignored": 0, "errors": 0, "denied": 0}
 
     # -- housekeeping ----------------------------------------------------
     def _is_new(self, message_id: str) -> bool:
@@ -79,12 +83,24 @@ class Dispatcher:
             return None
         if not self._authorised(message):
             self.stats["ignored"] += 1
+            self.stats["denied"] += 1
             return None
 
         # The channel decides what counts as a command (it filters on the
         # marker); here we only need the first token to name one.
         token, _, rest = text.partition(" ")
         command = resolve(token)
+        if command is None:
+            # An alias may stand in for a command the operator uses often.
+            aliases = self.services.get("aliases")
+            if aliases is not None:
+                target = aliases.resolve(token)
+                if target:
+                    parts = target.split(None, 1)
+                    command = resolve(parts[0])
+                    if command is not None:
+                        tail = parts[1] if len(parts) > 1 else ""
+                        rest = f"{tail} {rest}".strip()
         if command is None:
             self.stats["ignored"] += 1
             return None
@@ -98,7 +114,9 @@ class Dispatcher:
         now = time.time()
         wait = self.cooldown - (now - self._last_command)
         if wait > 0:
-            time.sleep(wait)
+            # Never block the event loop — the bot is asyncio all the way
+            # down and a blocking sleep here stalls every other task.
+            await asyncio.sleep(wait)
         self._last_command = time.time()
 
         args = rest.split()
@@ -106,6 +124,7 @@ class Dispatcher:
             engine=self.engine,
             author_id=message.author_id,
             author_name=message.author_name,
+            services=self.services,
         )
         try:
             reply = await command.handler(ctx, args)
@@ -119,6 +138,17 @@ class Dispatcher:
         if len(reply) > MAX_REPLY_CHARS:
             reply = reply[: MAX_REPLY_CHARS - 3] + "…"
         return reply or None
+
+    async def run_text(self, text: str, author_id: str = "", author_name: str = "") -> str | None:
+        """Run a command from a string — used by the API, the web UI and the
+        scheduler, so there is exactly one command path."""
+        message = InboundMessage(
+            id=f"inline-{time.time_ns()}",
+            text=text,
+            author_id=author_id,
+            author_name=author_name,
+        )
+        return await self.handle(message)
 
 
 def help_text() -> str:
