@@ -1,78 +1,103 @@
 #!/usr/bin/env python3
-"""Run the self-chat bot.
+"""Run the chat bot on its own, without the API.
 
-The bot reads commands from a TikTok chat channel and answers in the same
-channel. Today the working channel is the comment thread of one video:
-post a video, comment a command on it, and the bot replies with a comment.
+    python tools/bot.py --channel comment
+    python tools/bot.py --channel dm
+    python tools/bot.py --channel auto --video-id 7712427397584260373
 
-    # post a video, then point the bot at it
-    python tools/bot.py --channel comment --video-id 7684252586286927135
-
-    # only accept commands from your own user id
-    python tools/bot.py --channel comment --video-id <id> --allow 7712199357596075015
-
-Commands are prefixed with the marker (default "!"), e.g. "!help", "!profile tatemcrae".
+The bot polls the channel, runs the commands it finds and replies in the
+same place. It is the same code the service runs — this is the way to run
+it on a machine that is not always on.
 """
 from __future__ import annotations
 
 import argparse
 import asyncio
-import logging
-import os
+import signal
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.adapters.tiktok import TikTokAdapter  # noqa: E402
-from app.bot import BotEngine, BotRunner, CommentChannel, Dispatcher  # noqa: E402
-from app.config import settings  # noqa: E402
-from app.db import init_db  # noqa: E402
-
 
 async def run(args) -> int:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    await init_db()
+    from app.adapters.tiktok import TikTokAdapter
+    from app.bot.aliases import AliasStore
+    from app.bot.channel import CommentChannel, DmChannel, MultiChannel
+    from app.bot.dispatcher import Dispatcher
+    from app.bot.engine import BotEngine
+    from app.bot.runner import BotRunner
+    from app.config import settings
+    from app.scheduler import Scheduler
+    from app.state import StateStore
 
     adapter = TikTokAdapter()
     await adapter.start()
     engine = BotEngine(adapter)
 
-    allowed = {a for a in (args.allow or []) if a}
-    dispatcher = Dispatcher(engine, allowed_authors=allowed, cooldown=args.cooldown)
+    store = StateStore()
+    aliases = AliasStore(store)
+    await aliases.load()
 
-    channel = CommentChannel(engine, args.video_id, marker=args.marker)
+    dispatcher = Dispatcher(
+        engine,
+        allowed_authors=settings.bot_allowed_author_set,
+        cooldown=settings.bot_cooldown,
+    )
+    scheduler = Scheduler(dispatcher=dispatcher, store=store)
+    await scheduler.load()
+
+    comment = CommentChannel(engine, video_id=args.video_id, marker=settings.bot_marker)
+    dm = DmChannel(engine, marker=settings.bot_marker)
+    if args.channel == "dm":
+        channel = dm
+    elif args.channel == "comment":
+        channel = comment
+    else:
+        channel = MultiChannel([dm, comment])
+
+    dispatcher.services = {
+        "scheduler": scheduler,
+        "aliases": aliases,
+        "dispatcher": dispatcher,
+        "channel": channel,
+    }
+
     runner = BotRunner(engine, channel, dispatcher, interval=args.interval)
 
-    print(f"bot listening on the {channel.name} channel of video {args.video_id}")
-    print(f"prefix commands with {args.marker!r} — try {args.marker}help")
-    if not settings.allow_write_ops:
-        print("write commands are DISABLED (ALLOW_WRITE_OPS=false)")
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, stop.set)
+        except NotImplementedError:
+            pass
+
+    print(f"listening on the {channel.name} channel — press Ctrl-C to stop")
+    task = asyncio.create_task(runner.run_forever())
+    scheduler_task = asyncio.create_task(scheduler.run_forever(30.0))
 
     try:
-        await runner.run_forever()
-    except KeyboardInterrupt:
-        print("\nstopping")
+        await stop.wait()
     finally:
+        runner.stop()
+        scheduler.stop()
+        for pending in (task, scheduler_task):
+            try:
+                await asyncio.wait_for(pending, timeout=5)
+            except Exception:  # noqa: BLE001
+                pass
         await adapter.stop()
+    print("stopped")
     return 0
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--channel", choices=["comment", "dm"], default="comment")
-    ap.add_argument("--video-id", help="video whose comment thread is the chat")
-    ap.add_argument("--marker", default="/", help="command prefix")
-    ap.add_argument("--allow", nargs="*", help="user ids allowed to run commands")
-    ap.add_argument("--interval", type=float, default=15.0, help="seconds between polls")
-    ap.add_argument("--cooldown", type=float, default=2.0, help="seconds between commands")
-    args = ap.parse_args()
-
-    if args.channel == "comment" and not args.video_id:
-        ap.error("--video-id is required for the comment channel")
-    if args.channel == "dm":
-        print("the DM channel needs a working IM conversation — see the notes in README.md")
-        return 2
+    parser = argparse.ArgumentParser(description="Run the chat bot")
+    parser.add_argument("--channel", default="auto", choices=["auto", "comment", "dm"])
+    parser.add_argument("--video-id", default="", help="the video whose comments are the chat")
+    parser.add_argument("--interval", type=float, default=20.0, help="seconds between polls")
+    args = parser.parse_args()
     return asyncio.run(run(args))
 
 
