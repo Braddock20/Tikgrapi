@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import select
 
+from app.config import settings
 from app.db import SessionLocal, init_db
 from app.models import SessionMeta
 from app.security import (
@@ -15,7 +16,9 @@ from app.security import (
     hash_sessionid,
     mask_sessionid,
     normalize_cookies,
+    parse_session_material,
     parse_session_payload,
+    read_session,
     store_session,
     to_session_payload,
 )
@@ -23,12 +26,15 @@ from app.security import (
 log = logging.getLogger(__name__)
 
 
-async def save_session_material(raw: bytes | str) -> dict:
+async def save_session_material(
+    raw: bytes | str, cookies: dict[str, str] | None = None
+) -> dict:
     """Parse, normalise and encrypt a session; return its metadata.
 
     Accepts a browser cookie header or a JSON cookie export.
     """
-    cookies = parse_session_payload(raw)
+    if cookies is None:
+        cookies = parse_session_payload(raw)
     if not cookies:
         raise SessionError("No cookies found in the upload")
 
@@ -77,6 +83,74 @@ def _json_bytes(payload) -> bytes:
     import json
 
     return json.dumps(payload, indent=2).encode()
+
+
+# --------------------------------------------------------------------------
+# the environment as the permanent attachment
+# --------------------------------------------------------------------------
+def env_session_cookies() -> dict[str, str]:
+    """The cookies described by ``TIKTOK_SESSION``, if it is set."""
+    raw = (settings.tiktok_session or "").strip()
+    if not raw:
+        return {}
+    return parse_session_material(raw)
+
+
+def stored_sessionid() -> str | None:
+    """The sessionid of the stored session, if there is one."""
+    try:
+        return extract_sessionid(parse_session_payload(read_session()))
+    except SessionError:
+        return None
+
+
+async def install_session_from_env(force: bool = False) -> dict:
+    """Install the session described by ``TIKTOK_SESSION``.
+
+    This is the deployment's permanent attachment to the account: the
+    environment variable outlives restarts, redeploys and expired tokens.
+    The stored session file is the *working copy* — it carries the volatile
+    half that the site re-mints.
+
+    A stored session whose sessionid differs from the environment one is
+    kept: it is usually a sessionid the site rotated and the keeper already
+    proved works. Pass ``force`` to overwrite it anyway.
+    """
+    cookies = env_session_cookies()
+    if not cookies:
+        return {"installed": False, "reason": "TIKTOK_SESSION is not set"}
+
+    try:
+        sessionid = extract_sessionid(cookies)
+    except SessionError as exc:
+        raise SessionError(str(exc)) from exc
+
+    current = stored_sessionid()
+    if current and current != sessionid and not force:
+        log.warning(
+            "TIKTOK_SESSION holds a different sessionid (%s) than the stored "
+            "session (%s) — keeping the stored one, which the keeper has "
+            "already renewed. Update TIKTOK_SESSION to the current value, "
+            "or POST /admin/session to install a new session now.",
+            mask_sessionid(sessionid),
+            mask_sessionid(current),
+        )
+        return {
+            "installed": False,
+            "reason": "kept the stored session (different sessionid)",
+            "sessionid": mask_sessionid(current),
+        }
+
+    info = await save_session_material(
+        settings.tiktok_session, cookies=cookies
+    )
+    info["installed"] = True
+    log.info(
+        "session installed from TIKTOK_SESSION (%s, %s cookies)",
+        info.get("sessionid"),
+        info.get("cookies"),
+    )
+    return info
 
 
 async def record_verification(
