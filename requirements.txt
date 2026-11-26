@@ -10,3 +10,7 @@ python-multipart>=0.0.9
 cryptography>=43
 playwright>=1.40,<2
 curl-cffi>=0.7
+
+# The video engine: composition and encoding.
+pillow>=10.0
+numpy>=1.24
