@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 BACKEND_SSR = "ssr"
 BACKEND_API = "api"
 BACKEND_HTTP = "http"
+BACKEND_UPLOAD = "upload"
 
 
 @dataclass(frozen=True)
@@ -93,6 +94,17 @@ OPERATIONS: dict[str, OperationSpec] = {
         optional=("count",),
         verified=True,
     ),
+    "upload": OperationSpec(
+        name="upload",
+        summary="Post a video to the account",
+        backend=BACKEND_UPLOAD,
+        write=True,
+        required=("video_path",),
+        optional=("caption", "visibility", "allow_comment", "allow_duet",
+                  "allow_stretch", "schedule_time"),
+        verified=True,
+        note="Publishes through TikTok's creator pipeline — verified live.",
+    ),
     "search_users": OperationSpec(
         name="search_users",
         summary="Search for users by keyword",
@@ -139,6 +151,21 @@ OPERATIONS: dict[str, OperationSpec] = {
         backend=BACKEND_API,
         write=True,
         required=("video_id", "comment_id"),
+    ),
+    "delete_video": OperationSpec(
+        name="delete_video",
+        summary="Delete one of the account's own videos",
+        backend="upload",
+        write=True,
+        required=("aweme_id",),
+    ),
+    "visibility": OperationSpec(
+        name="visibility",
+        summary="Change a video's visibility (0 public, 1 friends, 2 private)",
+        backend="upload",
+        write=True,
+        required=("aweme_id",),
+        optional=("visibility",),
     ),
     "follow": OperationSpec(
         name="follow",
