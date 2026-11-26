@@ -1,0 +1,30 @@
+[
+  {
+    "id": "st_001",
+    "text": "We met on the worst night of the year. The heater had died, the bus was late, and I was sitting on the floor of a station I did not know the name of. You sat down next to me with two coffees and did not ask a single question. You just handed me one and started talking about the weather. That was the year I stopped being afraid of strangers. That was the year I stopped being afraid of most things. And that was the last year I was sure about anything at all.",
+    "category": "story",
+    "mood": "nostalgic",
+    "intensity": "high",
+    "format": "story",
+    "tags": [
+      "firstmeeting",
+      "winter",
+      "coffee"
+    ],
+    "duration_hint": 26
+  },
+  {
+    "id": "st_002",
+    "text": "My father never said he was proud of me. He also never once asked whether I was doing all right, and I only understood what that meant at about thirty. We fixed it the way families fix things: badly, slowly, and with a lot of talking about something else. He started asking about my week. I started calling him on Sundays. It is not the version I wanted. It is the version we got, and it turns out that is usually enough.",
+    "category": "story",
+    "mood": "reflective",
+    "intensity": "high",
+    "format": "story",
+    "tags": [
+      "family",
+      "father",
+      "growth"
+    ],
+    "duration_hint": 26
+  }
+]
