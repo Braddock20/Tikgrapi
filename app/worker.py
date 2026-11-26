@@ -75,17 +75,55 @@ async def run_job(ctx, job_id: str) -> None:
 
 
 async def startup(ctx) -> None:
-    """ARQ startup — build the adapter once for the worker process."""
+    """ARQ startup — build the adapter once for the worker process.
+
+    The worker is its own process, so it installs the session from
+    TIKTOK_SESSION itself and keeps it alive on its own.
+    """
+    import asyncio
+
     from app.adapters.tiktok import TikTokAdapter
+    from app.keeper import SessionKeeper, renewal_loop
+    from app.sessions import install_session_from_env
+
+    try:
+        await install_session_from_env()
+    except Exception as exc:  # noqa: BLE001
+        log.error("could not install the session from TIKTOK_SESSION: %s", exc)
 
     adapter = TikTokAdapter()
     await adapter.start()
+    keeper = SessionKeeper(adapter)
+    adapter.on_auth_failure = keeper.heal
     ctx["adapter"] = adapter
+    ctx["keeper"] = keeper
+    try:
+        await keeper.renew()
+        ctx["renewal_task"] = asyncio.create_task(renewal_loop(keeper))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("the first session renewal did not work: %s: %s", type(exc).__name__, exc)
+
+
+async def shutdown(ctx) -> None:
+    """ARQ shutdown — stop renewing the session."""
+    import asyncio
+
+    task = ctx.get("renewal_task")
+    if task is not None:
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            pass
+    adapter = ctx.get("adapter")
+    if adapter is not None:
+        await adapter.stop()
 
 
 class WorkerSettings:
     functions = [run_job]
     on_startup = startup
+    on_shutdown = shutdown
     redis_settings = None  # set at import time below
     max_jobs = settings.worker_concurrency
     job_timeout = 300
