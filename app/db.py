@@ -5,7 +5,7 @@ One code path for Postgres (production) and SQLite (local/dev).
 from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.pool import AsyncAdaptedQueuePool, StaticPool
 
 from app.config import settings
 
@@ -29,8 +29,13 @@ if settings.is_sqlite:
         # A file database needs a real pool: the API and the worker are
         # separate connections, and sharing one would let a read miss the
         # worker's commit.
+        #
+        # aiosqlite's default pool is a NullPool, which takes no size
+        # arguments — passing them raises at engine creation.
+        _engine_kwargs["poolclass"] = AsyncAdaptedQueuePool
         _engine_kwargs["pool_size"] = 5
         _engine_kwargs["max_overflow"] = 5
+        _engine_kwargs["pool_recycle"] = 1800
 
     engine = create_async_engine(settings.database_url, **_engine_kwargs)
 else:
