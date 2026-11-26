@@ -121,17 +121,34 @@ class SessionKeeper:
 
     # -- renewal ---------------------------------------------------------
     async def _harvest(self) -> dict[str, str]:
-        """Ask the site for a fresh set of device tokens."""
+        """Ask the site for a fresh set of device tokens.
+
+        The browser is used when it is *already running* — the site's own
+        JavaScript is what mints the msToken and the odin_tt. Waking a
+        400 MB Chromium every six hours to refresh a token that the plain
+        HTTP client can also refresh is a poor trade on a 512 MB instance,
+        so when the browser is idle the cheap HTTP path is used instead.
+        The browser is woken when a signed call actually fails.
+        """
         backend = getattr(self.engine, "_browser", None)
+        if backend is not None:
+            running = getattr(backend, "status", None)
+            is_up = bool(running and running().get("running")) if running else True
+            if is_up:
+                renew = getattr(backend, "renew_tokens", None)
+                if renew is not None:
+                    return await renew()
+                return await backend.harvest_cookies()
+
+        http = getattr(self.engine, "_http", None)
+        if http is not None:
+            return await http.renew_session()
+
         if backend is not None:
             renew = getattr(backend, "renew_tokens", None)
             if renew is not None:
                 return await renew()
             return await backend.harvest_cookies()
-
-        http = getattr(self.engine, "_http", None)
-        if http is not None:
-            return await http.renew_session()
 
         raise RuntimeError(
             "renewal needs a running backend — the site mints its device "
