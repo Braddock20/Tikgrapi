@@ -110,6 +110,38 @@ class HttpBackend:
         """Not supported by the HTTP backend — the page blob needs a browser."""
         raise RuntimeError("fetch_page requires the browser backend")
 
+    # -- renewal ---------------------------------------------------------
+    async def harvest_cookies(self) -> dict[str, str]:
+        """The cookies the site currently holds."""
+        if self._session is None:
+            return {}
+        return {c.name: c.value for c in self._session.cookies if c.value}
+
+    async def renew_session(self) -> dict[str, str]:
+        """Visit the site so it re-mints the device tokens.
+
+        The plain-HTTP backend cannot mint an msToken the way the site's
+        JavaScript does, but the server-side tokens (ttwid, the csrf token,
+        the chain token) are refreshed on any page visit — enough to keep a
+        session usable.
+        """
+        session = self._ensure()
+
+        def _visit() -> None:
+            session.get(
+                "https://www.tiktok.com/",
+                headers={
+                    "User-Agent": settings.http_user_agent,
+                    "Referer": "https://www.tiktok.com/",
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "Accept-Language": "en-US,en;q=0.9",
+                },
+                timeout=25,
+            )
+
+        await asyncio.to_thread(_visit)
+        return await self.harvest_cookies()
+
     @staticmethod
     def _decode(resp) -> dict[str, Any]:
         text = resp.text or ""
