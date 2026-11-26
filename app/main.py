@@ -3,19 +3,22 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import secrets
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
-from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi.responses import JSONResponse
 from sqlalchemy import desc, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.db import SessionLocal, engine, get_db, init_db
 from app.keeper import SessionKeeper, renewal_loop
+from app.memory import snapshot
 from app.models import AppState, Job
-from app.operations import WRITE_OPERATIONS, describe
+from app.operations import CATEGORIES, WRITE_OPERATIONS, describe
 from app.queue import InlineQueue, RedisQueue
 from app.schemas import JobCreate
 from app.sessions import (
@@ -35,14 +38,25 @@ job_queue = None
 probe_adapter = None
 keeper: SessionKeeper | None = None
 renewal_task: asyncio.Task | None = None
-boot_task: asyncio.Task | None = None  # CHANGED: background TikTok boot
-tt_adapter = None  # CHANGED: adapter owned by the lifespan
+boot_task: asyncio.Task | None = None
+tt_adapter = None
+
+# The bot and its services.
+bot_engine = None
+bot_dispatcher = None
+bot_runner = None
+scheduler = None
+aliases = None
+autoposter = None
+janitor_task: asyncio.Task | None = None
+keepalive_task: asyncio.Task | None = None
 
 # Timeouts (seconds) so nothing during boot can hang forever.
 DB_INIT_TIMEOUT = 60
 ADAPTER_START_TIMEOUT = 120
 RENEW_TIMEOUT = 60
 ATTACH_TIMEOUT = 30
+STARTED_AT = time.time()
 
 
 # --------------------------------------------------------------------------
@@ -54,7 +68,7 @@ async def _start_keeper(keeper: SessionKeeper) -> None:
 
     try:
         if settings.session_renew_on_boot:
-            await asyncio.wait_for(keeper.renew(), timeout=RENEW_TIMEOUT)  # CHANGED
+            await asyncio.wait_for(keeper.renew(), timeout=RENEW_TIMEOUT)
     except Exception as exc:  # noqa: BLE001
         log.warning(
             "the first session renewal did not work: %s: %s", type(exc).__name__, exc
@@ -62,7 +76,7 @@ async def _start_keeper(keeper: SessionKeeper) -> None:
 
     if settings.session_verify_on_boot:
         try:
-            attached = await asyncio.wait_for(  # CHANGED
+            attached = await asyncio.wait_for(
                 keeper.check_attached(), timeout=ATTACH_TIMEOUT
             )
         except Exception as exc:  # noqa: BLE001
@@ -83,8 +97,8 @@ async def _start_keeper(keeper: SessionKeeper) -> None:
     renewal_task = asyncio.create_task(renewal_loop(keeper))
 
 
-async def _boot_tiktok(adapter) -> None:  # CHANGED: new function
-    """Start Chromium and the keeper in the background.
+async def _boot_tiktok(adapter) -> None:
+    """Start the client and the keeper in the background.
 
     Runs after the port is bound, so a slow or failing browser can never
     keep the API from answering /health.
@@ -115,14 +129,149 @@ async def _boot_tiktok(adapter) -> None:  # CHANGED: new function
 
 
 # --------------------------------------------------------------------------
+# the bot
+# --------------------------------------------------------------------------
+async def _build_bot(adapter) -> None:
+    """Wire the chat bot, the scheduler and the aliases together."""
+    global bot_engine, bot_dispatcher, bot_runner, scheduler, aliases, autoposter
+
+    from app.bot.aliases import AliasStore
+    from app.bot.autoposter import AutoPoster
+    from app.bot.channel import CommentChannel, DmChannel, MultiChannel
+    from app.bot.dispatcher import Dispatcher
+    from app.bot.engine import BotEngine
+    from app.bot.runner import BotRunner
+    from app.scheduler import Scheduler
+    from app.state import StateStore
+
+    bot_engine = BotEngine(adapter)
+    store = StateStore()
+
+    aliases = AliasStore(store)
+    await aliases.load()
+
+    bot_dispatcher = Dispatcher(
+        bot_engine,
+        allowed_authors=settings.bot_allowed_author_set,
+        cooldown=settings.bot_cooldown,
+    )
+
+    scheduler = Scheduler(dispatcher=bot_dispatcher, store=store)
+    await scheduler.load()
+
+    autoposter = AutoPoster(bot_engine, "./data/queue")
+    autoposter.load_state()
+
+    comment_channel = CommentChannel(
+        bot_engine, video_id=settings.bot_video_id, marker=settings.bot_marker
+    )
+    dm_channel = DmChannel(bot_engine, marker=settings.bot_marker)
+
+    if settings.bot_channel == "dm":
+        channel = dm_channel
+    elif settings.bot_channel == "comment":
+        channel = comment_channel
+    else:
+        channel = MultiChannel([dm_channel, comment_channel])
+
+    services = {
+        "scheduler": scheduler,
+        "aliases": aliases,
+        "autoposter": autoposter,
+        "dispatcher": bot_dispatcher,
+        "channel": channel,
+    }
+    bot_dispatcher.services = services
+
+    bot_runner = BotRunner(
+        bot_engine,
+        channel,
+        bot_dispatcher,
+        interval=settings.bot_poll_interval,
+    )
+
+    if settings.scheduler_enabled:
+        asyncio.create_task(scheduler.run_forever(30.0))
+
+    bot_runner.start_task()
+    log.info("the bot is listening on the %s channel", channel.name)
+
+
+async def _send_welcome() -> tuple[bool, str]:
+    """Say hello on TikTok, so the operator knows the bot is alive.
+
+    Returns ``(sent, detail)`` so the caller can tell the operator the truth:
+    TikTok refuses state-changing calls from some IPs, and a cheerful
+    "sent" on a message that never left the machine is worse than useless.
+    """
+    if bot_runner is None:
+        return False, "the bot is not running yet"
+    from app.bot.welcome import build_welcome_async, deliver_welcome
+
+    try:
+        text = settings.welcome_text or await build_welcome_async(
+            bot_engine, marker=settings.bot_marker, interval=int(settings.bot_poll_interval)
+        )
+        ok, detail = await deliver_welcome(bot_runner.channel, text)
+        if ok:
+            log.info("the welcome message was sent: %s", detail)
+        else:
+            log.warning("the welcome message was not delivered: %s", detail)
+        return ok, detail
+    except Exception as exc:  # noqa: BLE001
+        detail = f"{type(exc).__name__}: {exc}"
+        log.warning("could not send the welcome message: %s", detail)
+        return False, detail
+
+
+# --------------------------------------------------------------------------
+# background helpers
+# --------------------------------------------------------------------------
+async def _janitor_loop() -> None:
+    """Release the browser when it has been idle, and keep the disk tidy."""
+    while True:
+        try:
+            await asyncio.sleep(30)
+            if tt_adapter is not None:
+                await tt_adapter.release_idle_browser()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            log.debug("the janitor had a problem: %s", exc)
+
+
+async def _keepalive_loop() -> None:
+    """Ping ourselves so Render does not freeze the free instance.
+
+    A frozen instance still works — it just takes ~50 seconds to wake up,
+    and the bot's session may have expired in the meantime.
+    """
+    import urllib.request
+
+    while True:
+        await asyncio.sleep(max(60.0, settings.keepalive_interval_seconds))
+        try:
+            port = int(os.environ.get("PORT", "8000"))
+        except ValueError:
+            port = 8000
+        url = f"http://127.0.0.1:{port}/health"
+        try:
+            await asyncio.to_thread(
+                lambda: urllib.request.urlopen(url, timeout=10).read()
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+
+# --------------------------------------------------------------------------
 # lifecycle
 # --------------------------------------------------------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global redis_pool, job_queue, probe_adapter, keeper, renewal_task
-    global boot_task, tt_adapter
+    global boot_task, tt_adapter, janitor_task, keepalive_task
 
-    await asyncio.wait_for(init_db(), timeout=DB_INIT_TIMEOUT)  # CHANGED
+    await asyncio.wait_for(init_db(), timeout=DB_INIT_TIMEOUT)
 
     # The permanent attachment: the session described by TIKTOK_SESSION is
     # installed before anything tries to use it, so a fresh deployment comes
@@ -147,8 +296,9 @@ async def lifespan(app: FastAPI):
     else:
         from app.adapters.tiktok import TikTokAdapter
 
-        # CHANGED: create the adapter and queue immediately, but start the
-        # browser and keeper in the background instead of awaiting them here.
+        # The adapter and the queue are created immediately, but the browser
+        # and the keeper start in the background so a slow browser can never
+        # keep the API from answering /health.
         tt_adapter = TikTokAdapter()
         queue = InlineQueue(settings.worker_concurrency, handler=run_job)
         queue.set_context({"adapter": tt_adapter})
@@ -157,10 +307,40 @@ async def lifespan(app: FastAPI):
         boot_task = asyncio.create_task(_boot_tiktok(tt_adapter))
         log.info("running with the in-process job queue (no Redis configured)")
 
+    # The chat bot, the scheduler and the aliases.
+    janitor_task = asyncio.create_task(_janitor_loop())
+    if settings.keepalive_enabled:
+        keepalive_task = asyncio.create_task(_keepalive_loop())
+
+    if tt_adapter is not None:
+        try:
+            await _build_bot(tt_adapter)
+        except Exception as exc:  # noqa: BLE001
+            log.exception("the bot could not start: %s", exc)
+    else:
+        log.info("the bot waits for Redis/ARQ mode to be wired up")
+
+    if settings.welcome_on_boot:
+        asyncio.create_task(_send_welcome())
+
     yield  # <- the port opens here now, without waiting for the browser
 
     # ---- shutdown ----
-    if boot_task is not None:  # CHANGED
+    for task in (janitor_task, keepalive_task):
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
+    janitor_task = keepalive_task = None
+    if bot_runner is not None:
+        bot_runner.stop()
+        bot_runner = None
+    if scheduler is not None:
+        scheduler.stop()
+        scheduler = None
+    if boot_task is not None:
         boot_task.cancel()
         try:
             await boot_task
@@ -176,7 +356,7 @@ async def lifespan(app: FastAPI):
         renewal_task = None
     if job_queue is not None:
         await job_queue.stop()
-    if tt_adapter is not None:  # CHANGED: stop Chromium so it isn't orphaned
+    if tt_adapter is not None:
         try:
             await tt_adapter.stop()
         except Exception:  # noqa: BLE001
@@ -188,7 +368,8 @@ async def lifespan(app: FastAPI):
     await engine.dispose()
 
 
-app = FastAPI(title=settings.app_name, version="0.3.0", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="0.4.0", lifespan=lifespan)
+
 
 # --------------------------------------------------------------------------
 # the control room
@@ -258,16 +439,54 @@ async def health():
         "writes_paused": paused,
         "write_ops_enabled": settings.allow_write_ops,
         "session": session,
+        "memory": snapshot(),
+        "uptime_seconds": round(time.time() - STARTED_AT, 1),
+        "bot": bot_runner.status() if bot_runner is not None else {"running": False},
     }
 
 
 @app.get("/api/operations", dependencies=[Depends(auth)])
 async def list_operations():
+    from app.operations import by_category
+
     return {
         "operations": describe(),
+        "by_category": by_category(),
+        "categories": CATEGORIES,
         "write_operations": sorted(WRITE_OPERATIONS),
         "allow_write_ops": settings.allow_write_ops,
     }
+
+
+@app.get("/api/commands", dependencies=[Depends(auth)])
+async def list_commands():
+    """Every command the bot understands, grouped for the UI."""
+    from app.bot.commands import describe_by_category
+
+    return {
+        "commands": describe_by_category(),
+        "categories": CATEGORIES,
+    }
+
+
+@app.post("/api/chat", dependencies=[Depends(auth)])
+async def run_command(payload: dict):
+    """Run a command the way the bot would.
+
+    This is what the web UI's console talks to, so the phone UI and the
+    TikTok chat share one code path.
+    """
+    if bot_dispatcher is None:
+        raise HTTPException(503, "the bot is not running yet")
+    text = str(payload.get("command") or payload.get("text") or "").strip()
+    if not text:
+        raise HTTPException(400, "no command given")
+    if not text.startswith(settings.bot_marker):
+        text = f"{settings.bot_marker}{text}"
+    reply = await bot_dispatcher.run_text(
+        text, author_id=str(payload.get("author_id") or "web"), author_name="web"
+    )
+    return {"command": text, "reply": reply or ""}
 
 
 # --------------------------------------------------------------------------
@@ -342,6 +561,79 @@ def serialize_job(j: Job) -> dict:
         "attempts": j.attempts,
         "created_at": j.created_at.isoformat() if j.created_at else None,
     }
+
+
+# --------------------------------------------------------------------------
+# automations
+# --------------------------------------------------------------------------
+@app.get("/api/scheduler", dependencies=[Depends(auth)])
+async def scheduler_jobs():
+    if scheduler is None:
+        return {"enabled": False, "jobs": []}
+    return {"enabled": True, "jobs": await scheduler.list()}
+
+
+@app.post("/api/scheduler", dependencies=[Depends(auth)])
+async def scheduler_add(payload: dict):
+    if scheduler is None:
+        raise HTTPException(503, "the scheduler is not running")
+    schedule = str(payload.get("schedule") or "").strip()
+    command = str(payload.get("command") or "").strip()
+    if not schedule or not command:
+        raise HTTPException(400, "a schedule and a command are needed")
+    from app.scheduler import ScheduleError
+
+    try:
+        job = await scheduler.add(schedule, command)
+    except ScheduleError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return job.as_dict()
+
+
+@app.delete("/api/scheduler/{job_id}", dependencies=[Depends(auth)])
+async def scheduler_remove(job_id: str):
+    if scheduler is None:
+        raise HTTPException(503, "the scheduler is not running")
+    return {"removed": await scheduler.remove(job_id)}
+
+
+@app.get("/api/aliases", dependencies=[Depends(auth)])
+async def list_aliases():
+    if aliases is None:
+        return {"aliases": []}
+    return {"aliases": await aliases.list(), "commands": aliases.aliases}
+
+
+@app.post("/api/aliases", dependencies=[Depends(auth)])
+async def add_alias(payload: dict):
+    if aliases is None:
+        raise HTTPException(503, "the aliases are not loaded yet")
+    name = str(payload.get("name") or "").strip()
+    command = str(payload.get("command") or "").strip()
+    if not name or not command:
+        raise HTTPException(400, "a name and a command are needed")
+    return {"result": await aliases.add(name, command)}
+
+
+@app.delete("/api/aliases/{name}", dependencies=[Depends(auth)])
+async def remove_alias(name: str):
+    if aliases is None:
+        raise HTTPException(503, "the aliases are not loaded yet")
+    return {"result": await aliases.remove(name)}
+
+
+@app.post("/api/welcome", dependencies=[Depends(auth)])
+async def send_welcome():
+    """Send the welcome message again, right now."""
+    ok, detail = await _send_welcome()
+    body: dict[str, object] = {"sent": ok, "detail": detail}
+    if not ok:
+        body["hint"] = (
+            "TikTok refused the write from this IP — the text was saved to "
+            "data/welcome.txt so you can post it by hand, and it will go out "
+            "by itself from an IP that is allowed to write."
+        )
+    return body
 
 
 # --------------------------------------------------------------------------
@@ -497,4 +789,3 @@ async def resume(db: AsyncSession = Depends(get_db)):
 async def unhandled(request: Request, exc: Exception):  # pragma: no cover
     log.exception("unhandled error on %s", request.url.path)
     return JSONResponse(status_code=500, content={"error": f"{type(exc).__name__}"})
- 
