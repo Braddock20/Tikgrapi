@@ -10,12 +10,39 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from typing import Any
 
 from curl_cffi import requests as curl_requests
 
 from app.config import settings
 from app.security import filter_for_http, parse_session_payload, read_session
+
+log = logging.getLogger(__name__)
+
+
+def _impersonate() -> str:
+    """The TLS fingerprint to present, with a safe fallback.
+
+    curl_cffi only knows the browser versions it was built against. Asking
+    for one it does not have would take the whole HTTP backend down, so an
+    unknown target falls back to the generic Chrome fingerprint.
+    """
+    wanted = (settings.http_impersonate or "chrome").strip()
+    try:
+        from curl_cffi.requests.impersonate import BrowserTypeLiteral
+        import typing
+
+        known = set(typing.get_args(BrowserTypeLiteral))
+    except Exception:  # noqa: BLE001
+        known = set()
+    if not known or wanted in known:
+        return wanted
+    log.warning(
+        "curl_cffi does not know the TLS fingerprint %r — using the generic "
+        "Chrome one instead", wanted,
+    )
+    return "chrome"
 
 
 def base_params() -> dict[str, str]:
@@ -56,7 +83,6 @@ class HttpBackend:
     def __init__(self) -> None:
         self._session: curl_requests.Session | None = None
         self._lock = asyncio.Lock()
-
     # -- lifecycle -------------------------------------------------------
     async def start(self) -> None:
         await self._refresh_session()
@@ -73,7 +99,7 @@ class HttpBackend:
         endpoints answer with an empty body.
         """
         cookies, _dropped = filter_for_http(parse_session_payload(read_session()))
-        session = curl_requests.Session(impersonate=settings.http_impersonate)
+        session = curl_requests.Session(impersonate=_impersonate())
         session.cookies.update(cookies)
         old = self._session
         self._session = session
@@ -115,7 +141,9 @@ class HttpBackend:
         """The cookies the site currently holds."""
         if self._session is None:
             return {}
-        return {c.name: c.value for c in self._session.cookies if c.value}
+        # curl_cffi's cookie jar is a mapping: iterating it yields the names,
+        # so the values are read through get_dict().
+        return {str(k): str(v) for k, v in self._session.cookies.get_dict().items() if v}
 
     async def renew_session(self) -> dict[str, str]:
         """Visit the site so it re-mints the device tokens.
