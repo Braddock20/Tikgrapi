@@ -239,6 +239,45 @@ class BrowserBackend:
             raise RuntimeError(f"No server-rendered data found on {url}")
         return blob
 
+    async def harvest_cookies(self) -> dict[str, str]:
+        """The cookies the site currently holds.
+
+        The page mints a fresh msToken on every visit — harvesting the jar
+        after a visit is how the volatile half of a session gets renewed.
+        """
+        async with self._lock:
+            if self._context is None:
+                return {}
+            jar = await self._context.cookies()
+        return {c["name"]: c["value"] for c in jar if c.get("value")}
+
+    async def renew_tokens(self) -> dict[str, str]:
+        """Visit a real page so the site mints a full set of device tokens.
+
+        The light homepage only hands out the server-side tokens; a full page
+        (the feed) is what makes the site mint the msToken, the odin_tt and
+        the s_v_web_id as well. Those are what the upload pipeline signs
+        with, so the feed is worth the extra seconds.
+        """
+        async with self._lock:
+            if self._page is None or self._context is None:
+                return {}
+            try:
+                await self._page.goto(
+                    "https://www.tiktok.com/foryou",
+                    wait_until="domcontentloaded",
+                    timeout=settings.browser_timeout_ms,
+                )
+                await self._page.wait_for_timeout(4000)
+                # The site writes the web id on the *second* load of the
+                # feed — one load is not enough to get it.
+                await self._page.reload(wait_until="domcontentloaded")
+                await self._page.wait_for_timeout(2500)
+            except Exception:  # noqa: BLE001 - best effort
+                pass
+            jar = await self._context.cookies()
+        return {c["name"]: c["value"] for c in jar if c.get("value")}
+
     async def account_context(self) -> dict[str, Any]:
         """The signed-in account as described by the app context."""
         blob = await self.fetch_page("/foryou")
