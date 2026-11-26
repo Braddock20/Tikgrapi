@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="color-scheme" content="light dark" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<title>Control Room — TikTok Automation Engine</title>
+<link rel="stylesheet" href="/ui/static/app.css" />
+</head>
+<body>
+
+<!-- ── the key gate ─────────────────────────────────────────────────────── -->
+<div class="gate" id="gate" hidden>
+  <div class="gate-card">
+    <div class="gate-mark" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="11" width="18" height="10" rx="3"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+      </svg>
+    </div>
+    <h1>Control Room</h1>
+    <p>This engine is locked. Paste the API key to continue.</p>
+    <input id="gate-key" type="password" placeholder="API key" autocomplete="current-password" spellcheck="false" />
+    <button id="gate-go" class="btn btn-primary btn-block">Unlock</button>
+    <span class="gate-error" id="gate-error"></span>
+  </div>
+</div>
+
+<div class="app" id="app">
+
+  <!-- ── the rail ───────────────────────────────────────────────────────── -->
+  <aside class="rail" id="rail">
+    <div class="rail-head">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M5 3.5v11.2a3.3 3.3 0 1 0 2 3V8.6l7-1.8v6.4a3.3 3.3 0 1 0 2 3V3.5z"/>
+          </svg>
+        </span>
+        <span class="brand-text">
+          <strong>Control Room</strong>
+          <small id="brand-sub">TikTok Automation Engine</small>
+        </span>
+      </div>
+      <button class="icon-btn rail-toggle" id="rail-toggle" title="Collapse the sidebar" aria-label="Collapse the sidebar"></button>
+    </div>
+
+    <nav class="rail-nav" id="rail-nav">
+      <button class="nav-item is-active" data-view="chat">
+        <span class="nav-icon" data-icon="chat"></span><span class="nav-label">Chat</span>
+      </button>
+      <button class="nav-item" data-view="content">
+        <span class="nav-icon" data-icon="text"></span><span class="nav-label">Content</span>
+        <span class="nav-count" id="count-content">—</span>
+      </button>
+      <button class="nav-item" data-view="library">
+        <span class="nav-icon" data-icon="image"></span><span class="nav-label">Library</span>
+        <span class="nav-count" id="count-assets">—</span>
+      </button>
+      <button class="nav-item" data-view="renders">
+        <span class="nav-icon" data-icon="film"></span><span class="nav-label">Renders</span>
+        <span class="nav-count" id="count-renders">—</span>
+      </button>
+      <button class="nav-item" data-view="queue">
+        <span class="nav-icon" data-icon="upload"></span><span class="nav-label">Queue</span>
+        <span class="nav-count" id="count-queue">—</span>
+      </button>
+      <button class="nav-item" data-view="settings">
+        <span class="nav-icon" data-icon="sliders"></span><span class="nav-label">Settings</span>
+      </button>
+    </nav>
+
+    <div class="rail-foot">
+      <div class="session" id="session">
+        <span class="dot" id="session-dot"></span>
+        <span class="session-text" id="session-text">checking…</span>
+      </div>
+      <div class="rail-meta" id="rail-meta">—</div>
+    </div>
+  </aside>
+
+  <!-- ── the stage ──────────────────────────────────────────────────────── -->
+  <main class="stage">
+    <header class="topbar">
+      <div class="topbar-title">
+        <h2 id="view-title">Chat</h2>
+        <p id="view-sub">Ask for a video, upload material, or run an engine command.</p>
+      </div>
+      <div class="topbar-actions">
+        <div class="segmented" id="profile-switch" role="group" aria-label="Render profile">
+          <button data-profile="standard" class="is-active">Standard</button>
+          <button data-profile="light">Light</button>
+        </div>
+        <button class="icon-btn" id="theme-toggle" title="Switch between light and dark" aria-label="Switch theme"></button>
+        <button class="icon-btn" id="fullscreen-toggle" title="Toggle full screen" aria-label="Toggle full screen"></button>
+        <button class="icon-btn" id="refresh-btn" title="Refresh" aria-label="Refresh"></button>
+      </div>
+    </header>
+
+    <!-- chat surface -->
+    <section class="view view-chat is-active" id="view-chat">
+      <div class="chat" id="chat">
+        <div class="chat-scroll" id="chat-scroll"></div>
+      </div>
+      <div class="composer">
+        <button class="icon-btn composer-attach" id="attach-btn" title="Upload content, photos, sounds or fonts" aria-label="Upload"></button>
+        <input type="file" id="file-input" multiple hidden
+               accept=".json,.txt,.md,.png,.jpg,.jpeg,.webp,.mp4,.mov,.mp3,.wav,.m4a,.aac,.ttf,.otf" />
+        <div class="composer-field">
+          <textarea id="composer-input" rows="1" placeholder="Ask for a video, or type /generate, /status, /cleanup…"></textarea>
+        </div>
+        <button class="icon-btn composer-send" id="send-btn" title="Send" aria-label="Send"></button>
+      </div>
+    </section>
+
+    <!-- data views -->
+    <section class="view view-data" id="view-data">
+      <div class="data-scroll" id="data-scroll"></div>
+    </section>
+  </main>
+</div>
+
+<div class="drop-veil" id="drop-veil" hidden><div class="drop-card">Drop to upload</div></div>
+
+<div class="toasts" id="toasts"></div>
+
+<script src="/ui/static/app.js"></script>
+</body>
+</html>
