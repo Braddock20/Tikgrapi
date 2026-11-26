@@ -16,6 +16,7 @@ from app.operations import (
     BACKEND_API,
     BACKEND_HTTP,
     BACKEND_SSR,
+    BACKEND_UPLOAD,
     OPERATIONS,
     get as get_operation,
 )
@@ -108,8 +109,13 @@ class TikTokAdapter:
 
     def __init__(self, backend: str | None = None) -> None:
         self.backend_name = (backend or settings.backend).lower()
+        # Set by the session keeper: called when a request comes back
+        # unauthenticated, so the session can be re-minted and the call
+        # retried once.
+        self.on_auth_failure = None
         self._browser = None
         self._http = None
+        self._uploader = None
         self._lock = asyncio.Lock()
         self.limiter = RateLimiter(
             min_interval=settings.request_min_interval,
@@ -144,6 +150,12 @@ class TikTokAdapter:
             logging.getLogger(__name__).warning("HTTP backend unavailable: %s", exc)
 
     async def stop(self) -> None:
+        if self._uploader is not None:
+            try:
+                await self._uploader.stop()
+            except Exception:  # noqa: BLE001
+                pass
+            self._uploader = None
         for backend in (self._browser, self._http):
             if backend is not None:
                 try:
@@ -160,6 +172,14 @@ class TikTokAdapter:
             await self._browser.reload_session()
 
     # -- helpers ---------------------------------------------------------
+    def _uploader_for(self):
+        """The upload pipeline is a separate client — it has its own protocol."""
+        if self._uploader is None:
+            from app.adapters.upload import Uploader
+
+            self._uploader = Uploader()
+        return self._uploader
+
     def _backend_for(self, spec) -> Any:
         if spec.backend == BACKEND_SSR:
             if self._browser is None:
@@ -171,6 +191,8 @@ class TikTokAdapter:
             if self._http is None:
                 raise BackendUnavailable("HTTP backend is not running")
             return self._http
+        if spec.backend == BACKEND_UPLOAD:
+            return self._uploader_for()
         if spec.backend == BACKEND_API:
             if self._browser is None:
                 raise BackendUnavailable(
@@ -195,7 +217,36 @@ class TikTokAdapter:
         async with self._lock:
             await self.limiter.acquire()
             handler = getattr(self, f"_op_{spec.name}")
-            return await handler(self._backend_for(spec), params or {})
+            try:
+                return await handler(self._backend_for(spec), params or {})
+            except Exception as exc:
+                if self.on_auth_failure is None or not _looks_like_auth_failure(exc):
+                    raise
+                # The session died — re-mint it and try once more.
+                await self.on_auth_failure()
+                return await handler(self._backend_for(spec), params or {})
+
+    # -- posting operations ----------------------------------------------
+    async def _op_upload(self, backend, p):
+        result = await backend.upload(
+            p["video_path"],
+            p.get("caption", ""),
+            visibility=int(p.get("visibility", 0)),
+            allow_comment=bool(p.get("allow_comment", True)),
+            allow_duet=bool(p.get("allow_duet", True)),
+            allow_stitch=bool(p.get("allow_stitch", True)),
+            schedule_time=int(p.get("schedule_time", 0)),
+        )
+        result["video_path"] = p["video_path"]
+        return result
+
+    async def _op_delete_video(self, backend, p):
+        return await backend.delete_video(p["aweme_id"])
+
+    async def _op_visibility(self, backend, p):
+        return await backend.set_visibility(
+            p["aweme_id"], int(p.get("visibility", 0))
+        )
 
     # -- read operations -------------------------------------------------
     async def _op_me(self, backend, p):
@@ -364,6 +415,20 @@ class TikTokAdapter:
             "following": follow_type == 0,
             "raw": _status(data),
         }
+
+
+def _looks_like_auth_failure(exc: Exception) -> bool:
+    """Does this error mean the session is no longer valid?"""
+    text = str(exc).lower()
+    return any(
+        marker in text
+        for marker in (
+            "empty body",       # the signature/token was rejected
+            "10202",            # TikTok's "not logged in" status
+            "illegal id",
+            "invalid session",
+        )
+    )
 
 
 def _status(data: Any) -> dict:
