@@ -1,0 +1,146 @@
+[
+  {
+    "id": "th_001",
+    "text": "Some days the quiet is enough, and other days it is just the absence of an answer.",
+    "category": "reflection",
+    "mood": "reflective",
+    "intensity": "medium",
+    "format": "diary",
+    "tags": [
+      "solitude",
+      "quiet"
+    ]
+  },
+  {
+    "id": "th_002",
+    "text": "You grow up and suddenly the biggest problem is that nobody called you back.",
+    "category": "thought",
+    "mood": "humour",
+    "intensity": "low",
+    "format": "scrapbook",
+    "tags": [
+      "growingup",
+      "friendship"
+    ]
+  },
+  {
+    "id": "th_003",
+    "text": "The version of you that laughed at everything is still in there. She just takes longer to come out.",
+    "category": "reflection",
+    "mood": "melancholic",
+    "intensity": "medium",
+    "format": "diary",
+    "tags": [
+      "change",
+      "growingup"
+    ]
+  },
+  {
+    "id": "th_004",
+    "text": "I keep a list of things I did not say, mostly to prove that I was thinking about you.",
+    "category": "relationship",
+    "mood": "romantic",
+    "intensity": "medium",
+    "format": "letter",
+    "tags": [
+      "words",
+      "silence"
+    ]
+  },
+  {
+    "id": "th_005",
+    "text": "Rest is not the same as being tired, but it is harder to admit.",
+    "category": "thought",
+    "mood": "calm",
+    "intensity": "low",
+    "format": "minimal",
+    "tags": [
+      "rest",
+      "slow"
+    ]
+  },
+  {
+    "id": "th_006",
+    "text": "Nothing is as clarifying as a long walk with no destination and no headphones.",
+    "category": "thought",
+    "mood": "calm",
+    "intensity": "low",
+    "format": "diary",
+    "tags": [
+      "walking",
+      "thinking"
+    ]
+  },
+  {
+    "id": "th_007",
+    "text": "Everyone is one bad week away from a completely different life, and almost nobody tells you that.",
+    "category": "observation",
+    "mood": "reflective",
+    "intensity": "high",
+    "format": "editorial",
+    "tags": [
+      "perspective",
+      "change"
+    ]
+  },
+  {
+    "id": "th_008",
+    "text": "I like people who are late and honest about being late.",
+    "category": "humour",
+    "mood": "funny",
+    "intensity": "low",
+    "format": "scrapbook",
+    "tags": [
+      "friendship",
+      "quirky"
+    ]
+  },
+  {
+    "id": "th_009",
+    "text": "The trick is not to want the old days back. It is to let them be worth having had.",
+    "category": "reflection",
+    "mood": "nostalgic",
+    "intensity": "medium",
+    "format": "nostalgic",
+    "tags": [
+      "nostalgia",
+      "growth"
+    ]
+  },
+  {
+    "id": "th_010",
+    "text": "Some people arrive in your life like weather, and you are glad for the rain anyway.",
+    "category": "observation",
+    "mood": "reflective",
+    "intensity": "medium",
+    "format": "editorial",
+    "tags": [
+      "people",
+      "weather"
+    ]
+  },
+  {
+    "id": "th_011",
+    "text": "I am learning that being needed is not the same as being loved.",
+    "category": "relationship",
+    "mood": "melancholic",
+    "intensity": "high",
+    "format": "diary",
+    "tags": [
+      "love",
+      "honesty"
+    ]
+  },
+  {
+    "id": "th_012",
+    "text": "Your phone is full of photos of a person you barely speak to anymore.",
+    "category": "observation",
+    "mood": "nostalgic",
+    "intensity": "low",
+    "format": "scrapbook",
+    "tags": [
+      "memories",
+      "phone"
+    ]
+  }
+]
