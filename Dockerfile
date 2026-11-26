@@ -48,15 +48,23 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # The browser. Playwright's own build is the default; SYSTEM_CHROME=1 uses
 # Debian's chromium and skips the download entirely.
-ARG SYSTEM_CHROME=0
-RUN if [ "$SYSTEM_CHROME" = "1" ]; then \
-        apt-get update \
-        && apt-get install -y --no-install-recommends chromium \
-        && rm -rf /var/lib/apt/lists/* \
-        && echo "using the system chromium"; \
-    else \
-        playwright install --with-deps chromium; \
-    fi
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    chromium \
+    fonts-unifont \
+    fonts-liberation \
+    fonts-noto-color-emoji \
+    libnss3 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libx11-xcb1 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxfixes3 \
+    libxrandr2 \
+    libgbm1 \
+    libasound2 \
+    libxshmfence1 \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY . .
 
