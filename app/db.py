@@ -17,15 +17,22 @@ if settings.is_sqlite:
 
         _Path(_db_path).parent.mkdir(parents=True, exist_ok=True)
 
-    engine = create_async_engine(
-        settings.database_url,
-        echo=False,
-        future=True,
-        # A single shared connection keeps the in-memory/file DB consistent
-        # across the API process and the in-process worker.
-        poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
+    _engine_kwargs: dict = {
+        "echo": False,
+        "future": True,
+        "connect_args": {"check_same_thread": False},
+    }
+    if ":memory:" in settings.database_url:
+        # An in-memory database only exists inside one connection.
+        _engine_kwargs["poolclass"] = StaticPool
+    else:
+        # A file database needs a real pool: the API and the worker are
+        # separate connections, and sharing one would let a read miss the
+        # worker's commit.
+        _engine_kwargs["pool_size"] = 5
+        _engine_kwargs["max_overflow"] = 5
+
+    engine = create_async_engine(settings.database_url, **_engine_kwargs)
 else:
     engine = create_async_engine(
         settings.database_url,
