@@ -1,0 +1,62 @@
+[
+  {
+    "id": "q_001",
+    "text": "What would you do differently if you knew it was your last ordinary Tuesday?",
+    "category": "question",
+    "mood": "reflective",
+    "intensity": "medium",
+    "format": "minimal",
+    "tags": [
+      "question",
+      "regret"
+    ]
+  },
+  {
+    "id": "q_002",
+    "text": "Have you ever stayed somewhere just to see who would come looking for you?",
+    "category": "question",
+    "mood": "reflective",
+    "intensity": "high",
+    "format": "scrapbook",
+    "tags": [
+      "question",
+      "people"
+    ]
+  },
+  {
+    "id": "q_003",
+    "text": "Is it weird that I miss the sound of a dial-up internet more than most sounds?",
+    "category": "question",
+    "mood": "nostalgic",
+    "intensity": "low",
+    "format": "nostalgic",
+    "tags": [
+      "nostalgia",
+      "internet"
+    ]
+  },
+  {
+    "id": "q_004",
+    "text": "Why do we say we are fine when we are clearly just busy?",
+    "category": "question",
+    "mood": "reflective",
+    "intensity": "medium",
+    "format": "editorial",
+    "tags": [
+      "question",
+      "honesty"
+    ]
+  },
+  {
+    "id": "q_005",
+    "text": "Do you ever talk to yourself in the exact voice someone else used to use?",
+    "category": "question",
+    "mood": "nostalgic",
+    "intensity": "medium",
+    "format": "diary",
+    "tags": [
+      "question",
+      "people"
+    ]
+  }
+]
