@@ -49,3 +49,27 @@ class BotEngine:
 
     async def session_meta(self) -> dict | None:
         return await current_session_meta()
+
+    # -- the video the chat runs on --------------------------------------
+    async def video_id(self) -> str:
+        """The video the comment channel talks on.
+
+        It is remembered rather than guessed: the account's own video list
+        is not always readable (TikTok answers with an empty body from a
+        datacenter IP), so the operator pins one video and the bot uses it.
+        """
+        async with SessionLocal() as db:
+            state = await db.get(AppState, "bot_video_id")
+            if state is None:
+                return ""
+            return str((state.value or {}).get("video_id") or "")
+
+    async def set_video_id(self, video_id: str) -> None:
+        async with SessionLocal() as db:
+            state = await db.get(AppState, "bot_video_id")
+            if state is None:
+                state = AppState(key="bot_video_id", value={"video_id": video_id})
+                db.add(state)
+            else:
+                state.value = {"video_id": video_id}
+            await db.commit()
