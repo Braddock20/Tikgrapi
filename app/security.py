@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -28,6 +29,15 @@ IDC_PAIR_COOKIES = frozenset({"tt-target-idc", "tt-target-idc-sign"})
 
 # Cookies that must survive normalisation for the session to stay usable.
 ESSENTIAL_COOKIES = ("sessionid", "ttwid", "msToken", "s_v_web_id")
+
+# A bare sessionid looks like this: 32 hex characters, no "=" and no ";".
+_BARE_SESSIONID = re.compile(r"^[A-Za-z0-9_\-]{16,128}$")
+
+# The edge a session was issued on. TikTok recognises the account from the
+# sessionid only when the request also names that edge — without it the
+# sessionid is treated as a guest token (verified live: a bare sessionid
+# answers "not logged in" with status_code 10202).
+DEFAULT_TARGET_IDC = "alisg"
 
 
 class SessionError(RuntimeError):
@@ -108,6 +118,43 @@ def extract_sessionid(cookies: dict[str, str]) -> str:
         "No sessionid found in the supplied cookies — export them from a "
         "logged-in TikTok browser session."
     )
+
+
+def build_session_from_sessionid(
+    sessionid: str, target_idc: str = DEFAULT_TARGET_IDC
+) -> dict[str, str]:
+    """The smallest cookie set that carries the account binding.
+
+    ``sessionid`` *is* the account binding — but TikTok only honours it when
+    the request also names the edge the session was issued on
+    (``tt-target-idc``). With just the sessionid the account reads as a guest
+    (live check: rendered page shows no user, inbox answers 10202); with the
+    edge cookie the same sessionid renders the logged-in account.
+
+    ``sessionid_ss`` carries the same value as ``sessionid`` in a real
+    browser, so it is set too.
+    """
+    if not sessionid:
+        raise SessionError("No sessionid given")
+    cookies = {"sessionid": sessionid, "sessionid_ss": sessionid}
+    if target_idc:
+        cookies["tt-target-idc"] = target_idc
+    return cookies
+
+
+def parse_session_material(raw: bytes | str) -> dict[str, str]:
+    """Parse session material of any shape.
+
+    Accepts a browser cookie header, a JSON cookie export, or a bare
+    sessionid — the last one is expanded into the minimal binding cookies.
+    """
+    text = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else raw
+    stripped = text.strip()
+    if stripped and "=" not in stripped and _BARE_SESSIONID.match(stripped):
+        from app.config import settings
+
+        return build_session_from_sessionid(stripped, settings.tiktok_target_idc)
+    return parse_session_payload(stripped)
 
 
 def mask_sessionid(sessionid: str) -> str:
