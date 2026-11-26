@@ -64,10 +64,6 @@ services:
       # Set this when the bot should only answer you.
       - key: BOT_ALLOWED_AUTHORS
         sync: false
-      # Uncomment to point the engine at a system Chrome instead of
-      # Playwright's own download (saves ~420 MB of image).
-      # - key: BROWSER_EXECUTABLE_PATH
-      #   value: /usr/bin/chromium
       # Uncomment to keep the free instance awake between visits.
       # - key: KEEPALIVE_ENABLED
       #   value: "true"
