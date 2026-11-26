@@ -122,9 +122,21 @@ def _engine_paths() -> dict[str, Path]:
 
 
 def _engine_config():
-    sys.path.insert(0, str(ENGINE_ROOT))
-    from video_engine.config import settings as engine_settings
+    """The video engine's settings.
 
+    The video engine is an optional extra: the chat bot, the session and the
+    automations all work without it, so a missing engine is reported as a
+    clean "not installed" instead of a stack trace.
+    """
+    sys.path.insert(0, str(ENGINE_ROOT))
+    try:
+        from video_engine.config import settings as engine_settings
+    except ImportError as exc:  # pragma: no cover
+        raise HTTPException(
+            503,
+            "the video engine is not installed in this deployment — the chat "
+            "bot, the session and the automations still work",
+        ) from exc
     return engine_settings
 
 
@@ -178,15 +190,11 @@ async def ui_auth(
 
 @router.get("/status", dependencies=[Depends(ui_auth)])
 async def ui_status() -> dict[str, Any]:
-    """Everything the status panel shows."""
-    from video_engine.content.loader import load_library
+    """Everything the status panel shows.
 
-    config = _engine_config()
-    engine = _engine()
-    library = load_library(config.content_dir)
-    usage = engine.history.usage()
-    used = sum(1 for value in usage.values() if value > 0)
-
+    The video engine is optional — when it is not installed, its parts are
+    simply left out and the rest of the status still comes back.
+    """
     session_info = {"present": False, "status": "unknown"}
     try:
         from app.security import session_exists
@@ -197,28 +205,43 @@ async def ui_status() -> dict[str, Any]:
     except Exception:  # noqa: BLE001
         pass
 
-    return {
-        "engine": {
+    payload: dict[str, Any] = {
+        "session": session_info,
+        "write_ops_enabled": settings.allow_write_ops,
+        "video_engine": False,
+    }
+
+    try:
+        from video_engine.content.loader import load_library
+
+        config = _engine_config()
+        engine = _engine()
+        library = load_library(config.content_dir)
+        usage = engine.history.usage()
+        used = sum(1 for value in usage.values() if value > 0)
+
+        payload["video_engine"] = True
+        payload["engine"] = {
             "profile": engine.profile.as_dict(),
             "content_dir": str(config.content_dir),
             "assets_dir": str(config.assets_dir),
             "output_dir": str(config.output_dir),
             "queue_dir": str(config.queue_dir),
-        },
-        "content": {
+        }
+        payload["content"] = {
             "files": library.report.files,
             "items": len(library),
             "used": used,
             "remaining": max(0, len(library) - used),
             "problems": library.report.errors[:10],
-        },
-        "assets": {
+        }
+        payload["assets"] = {
             "fonts": len(engine.fonts.all()),
             "sounds": len(engine.sounds.sounds),
             "pools": engine.assets.stats(),
-        },
-        "renders": engine.store.render_stats(),
-        "recent_renders": [
+        }
+        payload["renders"] = engine.store.render_stats()
+        payload["recent_renders"] = [
             {
                 "render_id": row["render_id"],
                 "output_path": row["output_path"],
@@ -229,22 +252,31 @@ async def ui_status() -> dict[str, Any]:
                 "created_at": row["created_at"],
             }
             for row in engine.store.recent_renders(12)
-        ],
-        "compositions": engine.store.recent_compositions(12),
-        "session": session_info,
-        "queue": [p.name for p in sorted(config.queue_dir.glob("*.mp4"))] if config.queue_dir.exists() else [],
-        "write_ops_enabled": settings.allow_write_ops,
-    }
+        ]
+        payload["compositions"] = engine.store.recent_compositions(12)
+        payload["queue"] = (
+            [p.name for p in sorted(config.queue_dir.glob("*.mp4"))]
+            if config.queue_dir.exists()
+            else []
+        )
+    except HTTPException:
+        payload["queue"] = []
+    except Exception as exc:  # noqa: BLE001
+        payload["video_engine_error"] = f"{type(exc).__name__}: {exc}"
+
+    return payload
 
 
 @router.get("/content", dependencies=[Depends(ui_auth)])
 async def ui_content(limit: int = 300) -> dict[str, Any]:
     """The content library, with usage flags."""
-    from video_engine.content.loader import load_library
+    try:
+        from video_engine.content.loader import load_library
+    except ImportError as exc:  # pragma: no cover
+        raise HTTPException(503, "the video engine is not installed") from exc
 
     config = _engine_config()
     library = load_library(config.content_dir)
-    usage = _engine_config()
     from video_engine.storage.database import HistoryStore
 
     store = HistoryStore(usage.db_path)
