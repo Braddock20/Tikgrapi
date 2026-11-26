@@ -56,12 +56,12 @@ process from scratch. So:
 | | what it does | why |
 |---|---|---|
 | **`BACKEND=auto`** | starts with the cheap HTTP client; the browser is launched only when an operation genuinely needs a signed request | most requests never need it |
-| **idle release** | the browser is shut down `BROWSER_IDUT_SECONDS` (default 180) after the last signed request | idle memory drops back to ~100 MB |
+| **idle release** | the browser is shut down `BROWSER_IDLE_SHUTDOWN_SECONDS` (default 180) after the last signed request | idle memory drops back to ~100 MB |
 | **one browser** | the DM channel and the API share a single Chromium | two of them do not fit |
 | **lazy pages** | the Messages page is only opened when a conversation actually exists | a second renderer costs ~300 MB |
 | **request blocking** | videos, images, fonts and analytics beacons are refused | the renderer never builds what the engine never reads |
 | **memory guard** | the browser refuses to start when there is less than `BROWSER_MIN_FREE_MB` free | a clear error instead of an OOM kill |
-| **system Chrome** | `BROWSER_EXECUTABLE_PATH` points the engine at a Chromium you already have | skips a ~420 MB download in the image |
+| **pinned Chromium** | Docker installs the browser revision matching the pinned Playwright package | avoids browser/driver version mismatches |
 | **SQLite + in-process queue** | no Redis, no Postgres | the free tier has neither, and both cost memory |
 
 Measured on the real account:
