@@ -1,129 +1,190 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="light">
+<html lang="en" data-theme="dark">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<meta name="color-scheme" content="light dark" />
-<meta name="apple-mobile-web-app-capable" content="yes" />
-<meta name="apple-mobile-web-app-status-bar-style" content="default" />
-<title>Control Room — TikTok Automation Engine</title>
-<link rel="stylesheet" href="/ui/static/app.css" />
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#08090c" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f7f7fa" media="(prefers-color-scheme: light)">
+<meta name="description" content="A control room for a TikTok automation engine — chat, commands, automations and session health.">
+<title>TikTok Engine</title>
+<link rel="preload" href="/ui/static/fonts/inter.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/ui/static/fonts/jakarta.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/ui/static/app.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230b0d12'/%3E%3Cpath d='M12 9v9a4 4 0 1 1-4-4' stroke='%2325f4ee' stroke-width='2.6' fill='none' stroke-linecap='round'/%3E%3Cpath d='M20 9v6a5 5 0 1 1-5-5' stroke='%23fe2c55' stroke-width='2.6' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
 </head>
 <body>
 
-<!-- ── the key gate ─────────────────────────────────────────────────────── -->
-<div class="gate" id="gate" hidden>
-  <div class="gate-card">
-    <div class="gate-mark" aria-hidden="true">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-        <rect x="3" y="11" width="18" height="10" rx="3"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-      </svg>
-    </div>
-    <h1>Control Room</h1>
-    <p>This engine is locked. Paste the API key to continue.</p>
-    <input id="gate-key" type="password" placeholder="API key" autocomplete="current-password" spellcheck="false" />
-    <button id="gate-go" class="btn btn-primary btn-block">Unlock</button>
-    <span class="gate-error" id="gate-error"></span>
-  </div>
-</div>
+<div class="aurora" aria-hidden="true"><span></span><span></span><span></span></div>
 
-<div class="app" id="app">
+<div class="shell" id="shell">
 
-  <!-- ── the rail ───────────────────────────────────────────────────────── -->
-  <aside class="rail" id="rail">
-    <div class="rail-head">
-      <div class="brand">
-        <span class="brand-mark" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M5 3.5v11.2a3.3 3.3 0 1 0 2 3V8.6l7-1.8v6.4a3.3 3.3 0 1 0 2 3V3.5z"/>
-          </svg>
-        </span>
-        <span class="brand-text">
-          <strong>Control Room</strong>
-          <small id="brand-sub">TikTok Automation Engine</small>
-        </span>
-      </div>
-      <button class="icon-btn rail-toggle" id="rail-toggle" title="Collapse the sidebar" aria-label="Collapse the sidebar"></button>
-    </div>
+  <!-- ── sidebar / topbar ─────────────────────────────────────────── -->
+  <header class="topbar">
+    <button class="icon-btn only-mobile" id="menuBtn" aria-label="Open the menu" aria-expanded="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+    </button>
 
-    <nav class="rail-nav" id="rail-nav">
-      <button class="nav-item is-active" data-view="chat">
-        <span class="nav-icon" data-icon="chat"></span><span class="nav-label">Chat</span>
-      </button>
-      <button class="nav-item" data-view="content">
-        <span class="nav-icon" data-icon="text"></span><span class="nav-label">Content</span>
-        <span class="nav-count" id="count-content">—</span>
-      </button>
-      <button class="nav-item" data-view="library">
-        <span class="nav-icon" data-icon="image"></span><span class="nav-label">Library</span>
-        <span class="nav-count" id="count-assets">—</span>
-      </button>
-      <button class="nav-item" data-view="renders">
-        <span class="nav-icon" data-icon="film"></span><span class="nav-label">Renders</span>
-        <span class="nav-count" id="count-renders">—</span>
-      </button>
-      <button class="nav-item" data-view="queue">
-        <span class="nav-icon" data-icon="upload"></span><span class="nav-label">Queue</span>
-        <span class="nav-count" id="count-queue">—</span>
-      </button>
-      <button class="nav-item" data-view="settings">
-        <span class="nav-icon" data-icon="sliders"></span><span class="nav-label">Settings</span>
-      </button>
+    <a class="brand" href="#console">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32"><path d="M12 9v9a4 4 0 1 1-4-4" stroke="var(--cyan)" stroke-width="2.6" fill="none" stroke-linecap="round"/><path d="M20 9v6a5 5 0 1 1-5-5" stroke="var(--pink)" stroke-width="2.6" fill="none" stroke-linecap="round"/></svg>
+      </span>
+      <span class="brand-text">
+        <strong>TikTok Engine</strong>
+        <small id="brandSub">connecting…</small>
+      </span>
+    </a>
+
+    <nav class="tabs" id="tabs" aria-label="Sections">
+      <button class="tab is-active" data-view="console"><span class="tab-ico">⌨</span><span class="tab-label">Console</span></button>
+      <button class="tab" data-view="commands"><span class="tab-ico">◈</span><span class="tab-label">Commands</span></button>
+      <button class="tab" data-view="automations"><span class="tab-ico">◷</span><span class="tab-label">Automations</span></button>
+      <button class="tab" data-view="status"><span class="tab-ico">◉</span><span class="tab-label">Status</span></button>
     </nav>
 
-    <div class="rail-foot">
-      <div class="session" id="session">
-        <span class="dot" id="session-dot"></span>
-        <span class="session-text" id="session-text">checking…</span>
-      </div>
-      <div class="rail-meta" id="rail-meta">—</div>
+    <div class="topbar-end">
+      <button class="icon-btn" id="themeBtn" aria-label="Switch the theme">
+        <svg class="ico-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>
+        <svg class="ico-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.4M12 19.6V22M4.2 4.2l1.7 1.7M18.1 18.1l1.7 1.7M2 12h2.4M19.6 12H22M4.2 19.8l1.7-1.7M18.1 5.9l1.7-1.7"/></svg>
+      </button>
+      <button class="icon-btn only-mobile" id="keyBtn" aria-label="The API key">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="14" r="4"/><path d="m11 11 8-8 2 2-2 2 2 2-2 2-2-2-2 2"/></svg>
+      </button>
     </div>
-  </aside>
+  </header>
 
-  <!-- ── the stage ──────────────────────────────────────────────────────── -->
-  <main class="stage">
-    <header class="topbar">
-      <div class="topbar-title">
-        <h2 id="view-title">Chat</h2>
-        <p id="view-sub">Ask for a video, upload material, or run an engine command.</p>
-      </div>
-      <div class="topbar-actions">
-        <div class="segmented" id="profile-switch" role="group" aria-label="Render profile">
-          <button data-profile="standard" class="is-active">Standard</button>
-          <button data-profile="light">Light</button>
-        </div>
-        <button class="icon-btn" id="theme-toggle" title="Switch between light and dark" aria-label="Switch theme"></button>
-        <button class="icon-btn" id="fullscreen-toggle" title="Toggle full screen" aria-label="Toggle full screen"></button>
-        <button class="icon-btn" id="refresh-btn" title="Refresh" aria-label="Refresh"></button>
-      </div>
-    </header>
+  <!-- ── views ────────────────────────────────────────────────────── -->
+  <main class="views" id="views">
 
-    <!-- chat surface -->
-    <section class="view view-chat is-active" id="view-chat">
-      <div class="chat" id="chat">
-        <div class="chat-scroll" id="chat-scroll"></div>
-      </div>
-      <div class="composer">
-        <button class="icon-btn composer-attach" id="attach-btn" title="Upload content, photos, sounds or fonts" aria-label="Upload"></button>
-        <input type="file" id="file-input" multiple hidden
-               accept=".json,.txt,.md,.png,.jpg,.jpeg,.webp,.mp4,.mov,.mp3,.wav,.m4a,.aac,.ttf,.otf" />
-        <div class="composer-field">
-          <textarea id="composer-input" rows="1" placeholder="Ask for a video, or type /generate, /status, /cleanup…"></textarea>
+    <!-- console -->
+    <section class="view is-active" id="view-console" role="tabpanel" aria-label="Console">
+      <div class="chat" id="chat" aria-live="polite">
+        <div class="msg bot">
+          <div class="msg-avatar" aria-hidden="true">✦</div>
+          <div class="msg-body">
+            <p>Welcome. Type a command — <code>/help</code> lists everything.</p>
+            <p class="muted">The same commands work as comments on your own video, and as direct messages.</p>
+          </div>
         </div>
-        <button class="icon-btn composer-send" id="send-btn" title="Send" aria-label="Send"></button>
+      </div>
+
+      <div class="composer-wrap">
+        <div class="chips" id="quickChips"></div>
+        <form class="composer" id="composer" autocomplete="off">
+          <span class="composer-caret" aria-hidden="true">/</span>
+          <input id="commandInput" type="text" name="command" placeholder="help" aria-label="A command" spellcheck="false" autocapitalize="none" autocorrect="off">
+          <button class="send-btn" type="submit" aria-label="Run the command">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h15M13 6l6 6-6 6"/></svg>
+          </button>
+        </form>
+        <div class="composer-hint" id="composerHint">Press Enter to run · the history is kept in this browser</div>
       </div>
     </section>
 
-    <!-- data views -->
-    <section class="view view-data" id="view-data">
-      <div class="data-scroll" id="data-scroll"></div>
+    <!-- commands -->
+    <section class="view" id="view-commands" role="tabpanel" aria-label="Commands">
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>Every command</h2>
+            <p class="muted" id="cmdCount">loading…</p>
+          </div>
+          <input class="search" id="cmdSearch" type="search" placeholder="Search commands…" aria-label="Search commands">
+        </div>
+        <div class="cat-list" id="catList"></div>
+      </div>
     </section>
+
+    <!-- automations -->
+    <section class="view" id="view-automations" role="tabpanel" aria-label="Automations">
+      <div class="grid-2">
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Scheduled jobs</h2>
+              <p class="muted">Commands that run on their own.</p>
+            </div>
+          </div>
+          <form class="row-form" id="jobForm">
+            <input id="jobSchedule" type="text" placeholder="every 30m" aria-label="The schedule" spellcheck="false">
+            <input id="jobCommand" type="text" placeholder="/status" aria-label="The command" spellcheck="false">
+            <button class="btn primary" type="submit">Add</button>
+          </form>
+          <p class="hint">Schedules: <code>every 30m</code> · <code>hourly</code> · <code>daily 09:00</code> · <code>*/15 * * * *</code></p>
+          <div class="list" id="jobList"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Custom commands</h2>
+              <p class="muted">Short names for the commands you use most.</p>
+            </div>
+          </div>
+          <form class="row-form" id="aliasForm">
+            <input id="aliasName" type="text" placeholder="vids" aria-label="The alias name" spellcheck="false">
+            <input id="aliasCommand" type="text" placeholder="/myvideos" aria-label="The command" spellcheck="false">
+            <button class="btn primary" type="submit">Add</button>
+          </form>
+          <div class="list" id="aliasList"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- status -->
+    <section class="view" id="view-status" role="tabpanel" aria-label="Status">
+      <div class="grid-2">
+        <div class="panel">
+          <div class="panel-head"><div><h2>Session</h2><p class="muted">The account this engine is attached to.</p></div></div>
+          <div class="stat-grid" id="sessionStats"></div>
+          <div class="row-actions">
+            <button class="btn" id="renewBtn">Renew the session</button>
+            <button class="btn" id="welcomeBtn">Say hello again</button>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head"><div><h2>Resources</h2><p class="muted">What the service is using right now.</p></div></div>
+          <div class="stat-grid" id="memStats"></div>
+          <div class="meter" id="memMeter" hidden><div class="meter-fill"></div></div>
+          <div class="row-actions">
+            <button class="btn" id="pauseBtn">Pause writes</button>
+            <button class="btn" id="resumeBtn">Resume writes</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><div><h2>Engine</h2><p class="muted">The live catalogue of what the engine can do.</p></div></div>
+        <div class="op-list" id="opList"></div>
+      </div>
+    </section>
+
   </main>
+
+  <!-- ── mobile bottom nav ────────────────────────────────────────── -->
+  <nav class="bottom-nav only-mobile" aria-label="Sections">
+    <button class="bnav is-active" data-view="console"><span>⌨</span>Console</button>
+    <button class="bnav" data-view="commands"><span>◈</span>Commands</button>
+    <button class="bnav" data-view="automations"><span>◷</span>Automate</button>
+    <button class="bnav" data-view="status"><span>◉</span>Status</button>
+  </nav>
+
 </div>
 
-<div class="drop-veil" id="drop-veil" hidden><div class="drop-card">Drop to upload</div></div>
+<!-- ── key dialog ─────────────────────────────────────────────────── -->
+<dialog class="modal" id="keyModal">
+  <form method="dialog" class="modal-inner">
+    <h2>The API key</h2>
+    <p class="muted">The same key the machine API uses. It is kept in this browser only.</p>
+    <input id="keyInput" type="password" placeholder="API key" spellcheck="false" autocomplete="off">
+    <div class="row-actions end">
+      <button class="btn" value="cancel">Cancel</button>
+      <button class="btn primary" id="keySave" value="save">Save</button>
+    </div>
+  </form>
+</dialog>
 
-<div class="toasts" id="toasts"></div>
+<div class="toasts" id="toasts" aria-live="polite"></div>
 
 <script src="/ui/static/app.js"></script>
 </body>
