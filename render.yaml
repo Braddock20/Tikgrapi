@@ -1,9 +1,29 @@
 # Render blueprint.
 #
+# Three environment variables are all this service needs:
+#
+#   API_KEY               — the key your clients send (X-API-Key).
+#   SESSION_ENCRYPTION_KEY— a Fernet key, encrypts the session at rest.
+#   TIKTOK_SESSION        — the account itself: your sessionid (or the whole
+#                           cookie header). This is the permanent attachment:
+#                           it survives restarts, redeploys and expired
+#                           device tokens, and it is only dead when you log
+#                           out of TikTok yourself.
+#
+# Everything else has a sane default in the app. Set ALLOW_WRITE_OPS=true
+# only when you mean it — it lets the engine change the account's state.
+#
 # The default deployment is a single web service that runs the job queue
 # in-process (REDIS_URL empty) and stores state in SQLite. That is the
 # cheapest shape that still works: Render's free tier has no Background
-# Worker, no persistent disk and spins down after 15 minutes idle.
+# Worker, no persistent disk and spins down after 15 minutes idle. The
+# session does not need a disk — it is rebuilt from TIKTOK_SESSION on every
+# boot, and the keeper renews it while the service runs.
+#
+# The video engine needs the opposite: its libraries, history and finished
+# videos must survive a restart, so they belong on a mounted disk (or in a
+# bucket). FFmpeg is installed in the image; rendering itself needs no
+# browser and no GPU.
 #
 # For a production shape, uncomment the worker + Postgres + Redis block below
 # and set REDIS_URL / DATABASE_URL to the managed instances.
@@ -20,22 +40,24 @@ services:
         sync: false
       - key: SESSION_ENCRYPTION_KEY
         sync: false
-      - key: DATABASE_URL
-        value: sqlite+aiosqlite:///./data/engine.db
-      - key: REDIS_URL
-        value: ""
-      - key: BACKEND
-        value: browser
-      - key: ALLOW_WRITE_OPS
-        value: "false"
-      - key: REQUEST_MIN_INTERVAL
-        value: "2.0"
-      - key: REQUEST_MAX_PER_HOUR
-        value: "240"
-    disk:
-      name: engine-data
-      mountPath: /data
-      sizeGB: 1
+      - key: TIKTOK_SESSION
+        sync: false
+      # --- the video engine (see video_engine/README.md) ---
+      # The content and asset libraries must survive restarts, so they live
+      # in a mounted disk or a synced bucket — Render's own filesystem is
+      # ephemeral. The finished videos belong in the same place.
+      - key: VE_CONTENT_DIR
+        value: /data/video_engine/content
+      - key: VE_ASSETS_DIR
+        value: /data/video_engine/assets
+      - key: VE_OUTPUT_DIR
+        value: /data/video_engine/out
+      - key: VE_QUEUE_DIR
+        value: /data/queue
+      - key: VE_DB_PATH
+        value: /data/video_engine/history.db
+      - key: VE_PROFILE
+        value: light
 
 # --- production shape -------------------------------------------------------
 # services:
@@ -50,15 +72,8 @@ services:
 #         sync: false
 #       - key: SESSION_ENCRYPTION_KEY
 #         sync: false
-#       - key: DATABASE_URL
-#         fromDatabase:
-#           name: tiktok-db
-#           property: connectionString
-#       - key: REDIS_URL
-#         fromService:
-#           type: redis
-#           name: tiktok-redis
-#           property: connectionString
+#       - key: TIKTOK_SESSION
+#         sync: false
 #
 #   - type: worker
 #     name: tiktok-automation-worker
@@ -68,6 +83,8 @@ services:
 #     dockerfilePath: ./Dockerfile
 #     envVars:
 #       - key: SESSION_ENCRYPTION_KEY
+#         sync: false
+#       - key: TIKTOK_SESSION
 #         sync: false
 #       - key: DATABASE_URL
 #         fromDatabase:
