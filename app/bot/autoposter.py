@@ -26,6 +26,24 @@ from app.adapters.upload import VIDEO_SUFFIXES
 
 log = logging.getLogger(__name__)
 
+DEFAULT_QUEUE_DIR = "./data/queue"
+
+
+def queue_files(directory: str | Path | None = None) -> list[Path]:
+    """The videos waiting to be posted."""
+    path = Path(directory or DEFAULT_QUEUE_DIR)
+    if not path.is_dir():
+        return []
+    files = [
+        item
+        for item in path.iterdir()
+        if item.is_file()
+        and item.suffix.lower() in VIDEO_SUFFIXES
+        and not item.name.startswith(".")
+    ]
+    return sorted(files, key=lambda p: (p.stat().st_mtime, p.name))
+
+
 
 class AutoPoster:
     """Posts videos from a queue directory."""
