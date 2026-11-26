@@ -225,6 +225,35 @@ async def _search(ctx: CommandContext, args: list[str]) -> str:
     return "\n".join(f"@{u.get('unique_id')} (id {u.get('id')})" for u in users[:15])
 
 
+async def _upload(ctx: CommandContext, args: list[str]) -> str:
+    if not args:
+        return "usage: /upload <video_path> [caption]"
+    path = args[0]
+    caption = " ".join(args[1:])
+    result = await ctx.engine.call("upload", {"video_path": path, "caption": caption})
+    if result.get("error"):
+        return f"upload failed: {result['error']}"
+    return (
+        f"posted {path}\n"
+        f"video id: {result.get('aweme_id') or '?'}\n"
+        f"status: {result.get('post_status_msg') or result.get('status_msg') or 'ok'}"
+    )
+
+
+async def _delete_video(ctx: CommandContext, args: list[str]) -> str:
+    if not args:
+        return "usage: /delete_video <video_id>"
+    await ctx.engine.call("delete_video", {"aweme_id": args[0]})
+    return f"deleted {args[0]}"
+
+
+async def _visibility(ctx: CommandContext, args: list[str]) -> str:
+    if len(args) < 2:
+        return "usage: /visibility <video_id> <0 public|1 friends|2 private>"
+    await ctx.engine.call("visibility", {"aweme_id": args[0], "visibility": int(args[1])})
+    return f"{args[0]} visibility -> {args[1]}"
+
+
 async def _pause(ctx: CommandContext, args: list[str]) -> str:
     await ctx.engine.set_paused(True)
     return "writes paused"
@@ -294,6 +323,12 @@ _register(Command(name="unfollow", usage="/unfollow <username>", summary="unfoll
                  handler=_unfollow, write=True))
 _register(Command(name="search", usage="/search <keyword>", summary="search for users",
                  handler=_search))
+_register(Command(name="upload", usage="/upload <video_path> [caption]",
+                 summary="post a video to the account", handler=_upload, write=True))
+_register(Command(name="delete_video", usage="/delete_video <video_id>",
+                 summary="delete one of the account's videos", handler=_delete_video, write=True))
+_register(Command(name="visibility", usage="/visibility <video_id> <0|1|2>",
+                 summary="change a video's visibility", handler=_visibility, write=True))
 _register(Command(name="pause", usage="/pause", summary="pause all write operations",
                  handler=_pause, aliases=("stop",)))
 _register(Command(name="resume", usage="/resume", summary="resume write operations",
