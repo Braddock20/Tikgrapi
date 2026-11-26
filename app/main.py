@@ -35,6 +35,14 @@ job_queue = None
 probe_adapter = None
 keeper: SessionKeeper | None = None
 renewal_task: asyncio.Task | None = None
+boot_task: asyncio.Task | None = None  # CHANGED: background TikTok boot
+tt_adapter = None  # CHANGED: adapter owned by the lifespan
+
+# Timeouts (seconds) so nothing during boot can hang forever.
+DB_INIT_TIMEOUT = 60
+ADAPTER_START_TIMEOUT = 120
+RENEW_TIMEOUT = 60
+ATTACH_TIMEOUT = 30
 
 
 # --------------------------------------------------------------------------
@@ -46,14 +54,23 @@ async def _start_keeper(keeper: SessionKeeper) -> None:
 
     try:
         if settings.session_renew_on_boot:
-            await keeper.renew()
+            await asyncio.wait_for(keeper.renew(), timeout=RENEW_TIMEOUT)  # CHANGED
     except Exception as exc:  # noqa: BLE001
         log.warning(
             "the first session renewal did not work: %s: %s", type(exc).__name__, exc
         )
 
     if settings.session_verify_on_boot:
-        if await keeper.check_attached():
+        try:
+            attached = await asyncio.wait_for(  # CHANGED
+                keeper.check_attached(), timeout=ATTACH_TIMEOUT
+            )
+        except Exception as exc:  # noqa: BLE001
+            attached = False
+            log.warning(
+                "the attach check did not finish: %s: %s", type(exc).__name__, exc
+            )
+        if attached:
             log.info("attached to the account")
         else:
             log.warning(
@@ -62,7 +79,39 @@ async def _start_keeper(keeper: SessionKeeper) -> None:
                 "the request also names the edge (tt-target-idc)"
             )
 
+    # Always start the renewal loop, even if the checks above failed.
     renewal_task = asyncio.create_task(renewal_loop(keeper))
+
+
+async def _boot_tiktok(adapter) -> None:  # CHANGED: new function
+    """Start Chromium and the keeper in the background.
+
+    Runs after the port is bound, so a slow or failing browser can never
+    keep the API from answering /health.
+    """
+    global keeper
+
+    try:
+        await asyncio.wait_for(adapter.start(), timeout=ADAPTER_START_TIMEOUT)
+    except Exception as exc:  # noqa: BLE001
+        log.error(
+            "could not start the TikTok client: %s: %s | the API stays up, but every "
+            "TikTok call will fail until a session is installed: "
+            "python tools/session_from_cookies.py --file <cookies.txt> "
+            "(or POST /admin/session)",
+            type(exc).__name__,
+            exc,
+        )
+        return
+
+    keeper = SessionKeeper(adapter)
+    # A call that comes back unauthenticated re-mints the session
+    # and is retried once.
+    adapter.on_auth_failure = keeper.heal
+    try:
+        await _start_keeper(keeper)
+    except Exception:  # noqa: BLE001
+        log.exception("the session keeper failed to start")
 
 
 # --------------------------------------------------------------------------
@@ -71,8 +120,9 @@ async def _start_keeper(keeper: SessionKeeper) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global redis_pool, job_queue, probe_adapter, keeper, renewal_task
+    global boot_task, tt_adapter
 
-    await init_db()
+    await asyncio.wait_for(init_db(), timeout=DB_INIT_TIMEOUT)  # CHANGED
 
     # The permanent attachment: the session described by TIKTOK_SESSION is
     # installed before anything tries to use it, so a fresh deployment comes
@@ -97,34 +147,26 @@ async def lifespan(app: FastAPI):
     else:
         from app.adapters.tiktok import TikTokAdapter
 
-        adapter = TikTokAdapter()
-        try:
-            await adapter.start()
-        except Exception as exc:  # noqa: BLE001
-            # The API must still answer /health even if the browser cannot
-            # start — the operator needs to see why, not a dead port.
-            log.error(
-                "could not start the TikTok client: %s: %s | the API stays up, but every "
-                "TikTok call will fail until a session is installed: "
-                "python tools/session_from_cookies.py --file <cookies.txt> "
-                "(or POST /admin/session)",
-                type(exc).__name__,
-                exc,
-            )
-        else:
-            keeper = SessionKeeper(adapter)
-            # A call that comes back unauthenticated re-mints the session
-            # and is retried once.
-            adapter.on_auth_failure = keeper.heal
-            await _start_keeper(keeper)
+        # CHANGED: create the adapter and queue immediately, but start the
+        # browser and keeper in the background instead of awaiting them here.
+        tt_adapter = TikTokAdapter()
         queue = InlineQueue(settings.worker_concurrency, handler=run_job)
-        queue.set_context({"adapter": adapter})
+        queue.set_context({"adapter": tt_adapter})
         await queue.start()
         job_queue = queue
+        boot_task = asyncio.create_task(_boot_tiktok(tt_adapter))
         log.info("running with the in-process job queue (no Redis configured)")
 
-    yield
+    yield  # <- the port opens here now, without waiting for the browser
 
+    # ---- shutdown ----
+    if boot_task is not None:  # CHANGED
+        boot_task.cancel()
+        try:
+            await boot_task
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            pass
+        boot_task = None
     if renewal_task is not None:
         renewal_task.cancel()
         try:
@@ -134,6 +176,12 @@ async def lifespan(app: FastAPI):
         renewal_task = None
     if job_queue is not None:
         await job_queue.stop()
+    if tt_adapter is not None:  # CHANGED: stop Chromium so it isn't orphaned
+        try:
+            await tt_adapter.stop()
+        except Exception:  # noqa: BLE001
+            log.exception("could not stop the TikTok client cleanly")
+        tt_adapter = None
     if probe_adapter is not None:
         await probe_adapter.stop()
         probe_adapter = None
@@ -449,3 +497,4 @@ async def resume(db: AsyncSession = Depends(get_db)):
 async def unhandled(request: Request, exc: Exception):  # pragma: no cover
     log.exception("unhandled error on %s", request.url.path)
     return JSONResponse(status_code=500, content={"error": f"{type(exc).__name__}"})
+ 
