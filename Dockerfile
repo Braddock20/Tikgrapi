@@ -9,7 +9,10 @@ WORKDIR /app
 # Chromium + the fonts the page renderer needs. The browser backend drives a
 # real Chromium so requests carry the signature the site produces.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates fonts-liberation fonts-noto-color-emoji \
+    ca-certificates \
+    fonts-liberation \
+    fonts-noto-color-emoji \
+    libatomic1 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
